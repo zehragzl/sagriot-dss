@@ -1,5 +1,6 @@
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import serial
 import board
@@ -10,7 +11,7 @@ import adafruit_tsl2591
 import adafruit_ds3231
 
 from .config import (
-    TZ_OFFSET_HOURS, SOIL_PORT, SOIL_BAUDRATE, SOIL_SLAVE_ID,
+    TZ_NAME, SOIL_PORT, SOIL_BAUDRATE, SOIL_SLAVE_ID,
     VWC_FIELD_CAPACITY, LUX_TO_PAR,
 )
 
@@ -33,7 +34,7 @@ def modbus_crc(data):
 class SensorHub:
     def __init__(self):
         self.available = {}
-        self.tz = timezone(timedelta(hours=TZ_OFFSET_HOURS))
+        self.tz = ZoneInfo(TZ_NAME)        
         i2c = board.I2C()
         self.sht31 = self._init("sht31d", lambda: adafruit_sht31d.SHT31D(i2c))
         self.scd41 = self._init("scd41", lambda: self._start_scd(i2c))
