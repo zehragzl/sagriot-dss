@@ -71,29 +71,63 @@ class SensorHub:
     def read_soil(self):
         request = bytes([SOIL_SLAVE_ID, 0x04, 0x00, 0x00, 0x00, 0x03])
         request += modbus_crc(request)
+
         try:
-            with serial.Serial(SOIL_PORT, SOIL_BAUDRATE, bytesize=8,
-                               parity=serial.PARITY_NONE, stopbits=1,
-                               timeout=2) as ser:
+            with serial.Serial(
+                SOIL_PORT,
+                SOIL_BAUDRATE,
+                bytesize=8,
+                parity=serial.PARITY_NONE,
+                stopbits=1,
+                timeout=2
+            ) as ser:
                 ser.reset_input_buffer()
                 ser.write(request)
-                time.sleep(0.2)
-                response = ser.read(20)
+                ser.flush()
+
+                response = bytearray()
+
+                deadline = time.time() + 5
+
+                while len(response) < 11 and time.time() < deadline:
+                    chunk = ser.read(11 - len(response))
+                    if chunk:
+                        response.extend(chunk)
+
         except Exception as error:
             print(f"[sensors] soil sensor error: {error}")
             return None
-        if len(response) < 9:
-            print("[sensors] soil sensor: response too short")
+
+        response = bytes(response)
+
+        if len(response) < 11:
+            print(f"[sensors] soil sensor: response too short ({len(response)}/11)")
             return None
+
         if response[0] != SOIL_SLAVE_ID or response[1] != 0x04 or response[2] != 6:
             print("[sensors] soil sensor: unexpected frame")
             return None
+
         if modbus_crc(response[:9]) != response[9:11]:
-            print("[sensors] soil sensor: CRC mismatch")
+            print(
+                f"[sensors] soil sensor: CRC mismatch "
+                f"(got {response[9:11].hex()}, "
+                f"expected {modbus_crc(response[:9]).hex()})"
+            )
             return None
-        temperature = int.from_bytes(response[3:5], "big", signed=True) / 100
-        vwc = int.from_bytes(response[5:7], "big", signed=False) / 100
-        ec_us = int.from_bytes(response[7:9], "big", signed=False)
+
+        temperature = int.from_bytes(
+            response[3:5], "big", signed=True
+        ) / 100
+
+        vwc = int.from_bytes(
+            response[5:7], "big", signed=False
+        ) / 100
+
+        ec_us = int.from_bytes(
+            response[7:9], "big", signed=False
+        )
+
         return temperature, vwc, ec_us
 
     def read(self):
