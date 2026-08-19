@@ -5,3 +5,8 @@ SOIL_SLAVE_ID = 1
 VWC_FIELD_CAPACITY = None
 LUX_TO_PAR = 0.0185
 TZ_NAME = "Europe/Berlin"
+
+PLANT = "tomato"
+LOG_PATH = "data/real_log.csv"
+READ_INTERVAL_SECONDS = 30
+

@@ -69,7 +69,15 @@ class SensorHub:
                 print(f"[sensors] RTC read failed: {error}")
         return datetime.now(self.tz)
 
-    def read_soil(self):
+    def read_soil(self, attempts=3):
+        for attempt in range(attempts):
+            result = self._read_soil_once()
+            if result is not None:
+                return result
+            time.sleep(0.3)
+        return None
+
+    def _read_soil_once(self):
         request = bytes([SOIL_SLAVE_ID, 0x04, 0x00, 0x00, 0x00, 0x03])
         request += modbus_crc(request)
 
@@ -117,13 +125,13 @@ class SensorHub:
             )
             return None
 
-        temperature = int.from_bytes(
-            response[3:5], "big", signed=True
-        ) / 100
-
         vwc = int.from_bytes(
+            response[3:5], "big", signed=True
+        ) / 10
+
+        temperature = int.from_bytes(
             response[5:7], "big", signed=False
-        ) / 100
+        ) / 10
 
         ec_us = int.from_bytes(
             response[7:9], "big", signed=False
