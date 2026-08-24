@@ -19,3 +19,5 @@ FORECASTERS = {
     "co2":          "persistence",
     "ec":           "persistence",
 }
+
+VWC_FIELD_CAPACITY = 64.9

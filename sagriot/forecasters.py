@@ -129,7 +129,7 @@ class MoiraiForecaster(Forecaster):
     def _load(self, horizon):
         raise NotImplementedError("Moirai kurulumunda README'ye gore doldurulacak")
 
-    def predict(self, history, horizon):
+    def predict(self, history, horizon, exog_past=None, exog_future=None):
         raise NotImplementedError
 
 class DrivenDrying(Forecaster):
