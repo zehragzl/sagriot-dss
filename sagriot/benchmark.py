@@ -3,7 +3,8 @@ import sys
 
 import pandas as pd
 
-from .evaluate import load_frame, evaluate, summarise
+from .evaluate import (load_frame, evaluate, summarise,
+                       channels_for, CROSSINGS, SOIL_MOISTURE)
 from .forecasters import (Persistence, SeasonalNaive, DampedTrend,
                           ChronosForecaster, DrivenDrying)
 
@@ -13,15 +14,6 @@ CONTEXT = 24 * 60 // STEP_MINUTES
 HORIZON = 3 * 60 // STEP_MINUTES
 STRIDE = 60 // STEP_MINUTES
 SEASON = 24 * 60 // STEP_MINUTES
-
-CHANNELS = ["air_temp", "air_humidity", "par", "soil_vwc"]
-
-CROSSINGS = {
-    "air_temp":     (0.85, "above"),
-    "air_humidity": (0.85, "above"),
-    "soil_vwc":     (0.15, "below"),
-}
-
 DRIVERS = ("vpd", "par")
 
 
@@ -38,10 +30,11 @@ def run(paths):
     collected = []
     for path in paths:
         dataset = os.path.basename(path).replace(".csv", "")
-        frame = load_frame(path, CHANNELS, resample=RESAMPLE)
+        channels = channels_for(path)
+        frame = load_frame(path, channels, resample=RESAMPLE)
         print(f"\n########## {dataset} — {len(frame)} nokta ##########")
 
-        for channel in CHANNELS:
+        for channel in channels:
             values = frame[channel].to_numpy(dtype=float)
             threshold, direction = None, "below"
             if channel in CROSSINGS:
@@ -49,8 +42,9 @@ def run(paths):
                 threshold = float(pd.Series(values).quantile(quantile))
 
             models = list(base_models)
-            if channel == "soil_vwc":
+            if channel in SOIL_MOISTURE:
                 models += driven_models
+
             results = evaluate(frame, channel, models, CONTEXT, HORIZON,
                                STRIDE, SEASON, threshold=threshold,
                                direction=direction, drivers=DRIVERS)
@@ -72,6 +66,7 @@ def run(paths):
     out_path = f"results/benchmark_{names}.csv"
     combined.to_csv(out_path, index=False)
     print(f"\nkaydedildi: {out_path}")
+    return combined
 
 
 if __name__ == "__main__":

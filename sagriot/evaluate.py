@@ -4,17 +4,10 @@ import time
 import numpy as np
 import pandas as pd
 
-from .forecasters import Persistence, SeasonalNaive, DampedTrend, ChronosForecaster, DrivenDrying
+from .forecasters import (Persistence, SeasonalNaive, DampedTrend,
+                          ChronosForecaster, DrivenDrying)
 from .features import compute_vpd
 
-def load_frame(path, channels, resample=None):
-    data = {}
-    for channel in channels:
-        data[channel] = load_any(path, channel, resample)
-    frame = pd.DataFrame(data)
-    if "air_temp" in frame.columns and "air_humidity" in frame.columns:
-        frame["vpd"] = [compute_vpd(t, h) for t, h in zip(frame["air_temp"], frame["air_humidity"])]
-    return frame.dropna()
 
 WAGENINGEN = {
     "air_temp":     "compartment/air_temperature",
@@ -24,6 +17,20 @@ WAGENINGEN = {
     "soil_temp":    "compartment/substrate/substrate_temperature",
     "soil_fc":      "compartment/substrate/relative_permittivity",
 }
+
+WAGENINGEN_CHANNELS = ["air_temp", "air_humidity", "par", "co2", "soil_fc", "soil_temp", "ec"]
+REAL_CHANNELS = ["air_temp", "air_humidity", "par", "co2", "soil_vwc", "soil_temp", "ec"]
+
+CROSSINGS = {
+    "air_temp":     (0.85, "above"),
+    "air_humidity": (0.85, "above"),
+    "soil_fc":      (0.15, "below"),
+    "soil_vwc":     (0.15, "below"),
+    "soil_temp":    (0.15, "below"),
+    "ec":           (0.85, "above"),
+}
+
+SOIL_MOISTURE = ("soil_fc", "soil_vwc")
 
 
 def load_wageningen(path, channel, resample=None):
@@ -50,6 +57,15 @@ def load_wageningen(path, channel, resample=None):
     return series.interpolate(limit=3, limit_area="inside").dropna()
 
 
+def load_series(path, channel, resample=None):
+    frame = pd.read_csv(path, parse_dates=["timestamp"])
+    frame = frame.sort_values("timestamp").set_index("timestamp")
+    series = pd.to_numeric(frame[channel], errors="coerce")
+    if resample:
+        series = series.resample(resample).mean()
+    return series.interpolate(limit=3, limit_area="inside").dropna()
+
+
 def load_any(path, channel, resample=None):
     header = pd.read_csv(path, nrows=0)
     if "timestamp" in header.columns:
@@ -57,14 +73,18 @@ def load_any(path, channel, resample=None):
     return load_wageningen(path, channel, resample)
 
 
-def load_series(path, channel, resample=None):
-    frame = pd.read_csv(path, parse_dates=["timestamp"])
-    frame = frame.sort_values("timestamp").set_index("timestamp")
-    series = pd.to_numeric(frame[channel], errors="coerce")
-    if resample:
-        series = series.resample(resample).mean()
-    series = series.interpolate(limit=3, limit_area="inside").dropna()
-    return series
+def channels_for(path):
+    header = pd.read_csv(path, nrows=0)
+    return REAL_CHANNELS if "timestamp" in header.columns else WAGENINGEN_CHANNELS
+
+
+def load_frame(path, channels, resample=None):
+    data = {channel: load_any(path, channel, resample) for channel in channels}
+    frame = pd.DataFrame(data)
+    if "air_temp" in frame.columns and "air_humidity" in frame.columns:
+        frame["vpd"] = [compute_vpd(t, h)
+                        for t, h in zip(frame["air_temp"], frame["air_humidity"])]
+    return frame.dropna()
 
 
 def crossing_step(values, threshold, direction):
@@ -126,6 +146,7 @@ def evaluate(frame, target, models, context, horizon, step, season,
 
     return pd.DataFrame(records)
 
+
 def summarise(results, step_minutes):
     grouped = results.groupby("model")
     table = grouped.agg(
@@ -161,6 +182,7 @@ def summarise(results, step_minutes):
 
     return table.sort_values("mae").round(3)
 
+
 if __name__ == "__main__":
     path = sys.argv[1]
     channel = sys.argv[2] if len(sys.argv) > 2 else "air_temp"
@@ -172,19 +194,7 @@ if __name__ == "__main__":
     STRIDE = 60 // STEP_MINUTES
     SEASON = 24 * 60 // STEP_MINUTES
 
-    CROSSINGS = {
-        "air_temp":     (0.85, "above"),
-        "air_humidity": (0.85, "above"),
-        "soil_fc":      (0.15, "below"),
-        "soil_vwc":     (0.15, "below"),
-    }
-    WAGENINGEN_CHANNELS = ["air_temp", "air_humidity", "par", "co2", "soil_fc", "soil_temp", "ec"]
-    REAL_CHANNELS = ["air_temp", "air_humidity", "par", "soil_vwc"]
-
-    header = pd.read_csv(path, nrows=0)
-    CHANNELS = REAL_CHANNELS if "timestamp" in header.columns else WAGENINGEN_CHANNELS
-
-    frame = load_frame(path, CHANNELS, resample=RESAMPLE)
+    frame = load_frame(path, channels_for(path), resample=RESAMPLE)
     values = frame[channel].to_numpy(dtype=float)
     print(f"{channel}: {len(frame)} nokta, {frame.index[0]} -> {frame.index[-1]}")
 
@@ -200,9 +210,9 @@ if __name__ == "__main__":
         SeasonalNaive(SEASON),
         DampedTrend(),
         ChronosForecaster("amazon/chronos-bolt-tiny"),
-        DrivenDrying(("vpd",)),
-        DrivenDrying(("vpd", "par")),
     ]
+    if channel in SOIL_MOISTURE:
+        models += [DrivenDrying(("vpd",)), DrivenDrying(("vpd", "par"))]
 
     results = evaluate(frame, channel, models, CONTEXT, HORIZON, STRIDE, SEASON,
                        threshold=THRESHOLD, direction=DIRECTION, drivers=("vpd", "par"))
