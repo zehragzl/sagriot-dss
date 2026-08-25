@@ -2,7 +2,7 @@ SOIL_PORT = "/dev/ttyUSB0"
 SOIL_BAUDRATE = 9600
 SOIL_SLAVE_ID = 1
 
-VWC_FIELD_CAPACITY = None
+VWC_FIELD_CAPACITY = 64.9
 LUX_TO_PAR = 0.0185
 TZ_NAME = "Europe/Berlin"
 
@@ -19,5 +19,3 @@ FORECASTERS = {
     "co2":          "persistence",
     "ec":           "persistence",
 }
-
-VWC_FIELD_CAPACITY = 64.9

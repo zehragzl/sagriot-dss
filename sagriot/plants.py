@@ -36,7 +36,7 @@ PLANTS = {
                 "co2":            {"crit_low": 400,  "warn_low": 800, "warn_high": 1000, "crit_high": None},
                 "dli":            {"crit_low": None, "warn_low": 25,  "warn_high": 35,   "crit_high": None},
                 "soil_fc":        {"crit_low": 60,   "warn_low": 70,  "warn_high": 80,   "crit_high": None},
-                "soil_temp":      {"crit_low": 14,   "warn_low": 15,  "warn_high": 22,   "crit_high": 35},
+                "soil_temp":      {"crit_low": 14,   "warn_low": 15,  "warn_high": 22,   "crit_high": 30},
                 "ec":             {"crit_low": None, "warn_low": 1.2, "warn_high": 3.5,  "crit_high": 5.0},
             },
             "seedling": {

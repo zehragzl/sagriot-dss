@@ -1,13 +1,13 @@
-import numpy as np
-import pandas as pd
 import sys
 
-from .config import FORECASTERS, LOG_PATH, VWC_FIELD_CAPACITY
+import numpy as np
+import pandas as pd
+
+from .config import FORECASTERS, LOG_PATH, PLANT, VWC_FIELD_CAPACITY
 from .features import compute_vpd
 from .forecasters import (Persistence, SeasonalNaive, DampedTrend,
                           ChronosForecaster, DrivenDrying)
 from .rules import rules
-from .config import PLANT
 
 STEP_MINUTES = 5
 RESAMPLE = f"{STEP_MINUTES}min"
@@ -231,6 +231,13 @@ def score(issued, onsets, max_lead_minutes=180):
     return pd.DataFrame(results)
 
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "replay":
+        issued, onsets = replay(LOG_PATH)
+        print(f"\nuretilen uyari: {len(issued)}, gercek tetiklenme: {len(onsets)}")
+        print()
+        print(score(issued, onsets).to_string(index=False))
+        raise SystemExit
+
     frame = load_recent(LOG_PATH)
     print(f"{len(frame)} nokta (gereken: {CONTEXT})")
 
@@ -256,10 +263,4 @@ if __name__ == "__main__":
     for item in result["upcoming"]:
         flag = "SIMDI UYAR" if item["advise_now"] else f"{item['when_minutes'] - item['lead_minutes']} dk sonra uyar"
         print(f"   {item['rule']}: {item['when_minutes']} dk sonra ({item['status']}) - {flag}")
-
-    if len(sys.argv) > 1 and sys.argv[1] == "replay":
-        issued, onsets = replay(LOG_PATH)
-        print(f"\nuretilen uyari: {len(issued)}, gercek tetiklenme: {len(onsets)}")
-        print()
-        print(score(issued, onsets).to_string(index=False))
         raise SystemExit
