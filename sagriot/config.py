@@ -11,10 +11,10 @@ LOG_PATH = "data/real_log.csv"
 READ_INTERVAL_SECONDS = 30
 
 FORECASTERS = {
-    "soil_vwc":     "driven_drying_vpd",
+    "soil_vwc":     "driven_drying_vpd_par",
     "par":          "chronos_tiny",
     "air_temp":     "chronos_tiny",
-    "air_humidity": "persistence",
+    "air_humidity": "chronos_tiny",
     "soil_temp":    "chronos_tiny",
     "co2":          "persistence",
     "ec":           "persistence",

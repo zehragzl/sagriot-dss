@@ -133,9 +133,20 @@ class MoiraiForecaster(Forecaster):
         raise NotImplementedError
 
 class DrivenDrying(Forecaster):
-    def __init__(self, drivers=("vpd",)):
+    def __init__(self, drivers=("vpd",), ridge=1e-3, non_increasing=True):
         self.drivers = tuple(drivers)
+        self.ridge = ridge
+        self.non_increasing = non_increasing
         self.name = "driven_drying(" + "+".join(self.drivers) + ")"
+
+    def _fit(self, design, target):
+        gram = design.T @ design
+        penalty = np.eye(design.shape[1]) * self.ridge * np.trace(gram) / design.shape[1]
+        penalty[-1, -1] = 0.0
+        try:
+            return np.linalg.solve(gram + penalty, design.T @ target)
+        except np.linalg.LinAlgError:
+            return np.linalg.lstsq(design, target, rcond=None)[0]
 
     def predict(self, history, horizon, exog_past=None, exog_future=None):
         history = np.asarray(history, dtype=float)
@@ -145,9 +156,11 @@ class DrivenDrying(Forecaster):
         delta = np.diff(history)
         past = [np.asarray(exog_past[d], dtype=float)[1:] for d in self.drivers]
         design = np.column_stack(past + [np.ones(len(delta))])
-        coefficients, *_ = np.linalg.lstsq(design, delta, rcond=None)
+        coefficients = self._fit(design, delta)
 
         future = [np.asarray(exog_future[d], dtype=float) for d in self.drivers]
         design_future = np.column_stack(future + [np.ones(horizon)])
         rates = design_future @ coefficients
+        if self.non_increasing:
+            rates = np.minimum(rates, 0.0)
         return history[-1] + np.cumsum(rates)

@@ -69,16 +69,18 @@ def main():
                         disease_hours_now=row.get("disease_hours", 0.0),
                     )
                     upcoming = {item["rule"]: item for item in result["upcoming"]}
+                    if upcoming:
+                        print("   ~> EARLY WARNING (next 3 h):")
                     for name, item in upcoming.items():
-                        if announced.get(name) == item["advise_now"]:
-                            continue
+                        mark = "  *NEW*" if announced.get(name) != item["advise_now"] else ""
                         announced[name] = item["advise_now"]
-                        when = "SIMDI UYAR" if item["advise_now"] else \
-                               f"{item['when_minutes'] - item['lead_minutes']} dk sonra uyar"
-                        print(f"   ~> ONGORU: {item['rule']} — {item['when_minutes']} dk sonra "
-                              f"({item['status']}) — {when}")
+                        when = "ADVISE NOW" if item["advise_now"] else \
+                               f"advise in {item['when_minutes'] - item['lead_minutes']} min"
+                        print(f"      {item['rule']:24s} in {item['when_minutes']:3d} min "
+                              f"({item['status']}) — {when}{mark}")
                     for name in list(announced):
                         if name not in upcoming:
+                            print(f"      {name:24s} no longer forecast")
                             del announced[name]
                 else:
                     print(f"   ~> tahmin icin yeterli gecmis yok ({len(recent)}/{CONTEXT})")
