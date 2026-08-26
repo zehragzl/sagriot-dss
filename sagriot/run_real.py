@@ -1,6 +1,6 @@
 import time
 
-from .config import PLANT, LOG_PATH, READ_INTERVAL_SECONDS
+from .config import PLANT, LOG_PATH, ADVICE_PATH, READ_INTERVAL_SECONDS
 from .features import DailyLight, DiseaseHours, FreshnessTracker, enrich_row
 from .rules import rules, get_thresholds
 from .advise import (CONTEXT, load_recent, build_forecasters,
@@ -71,7 +71,13 @@ def main():
                         dli_now=row.get("dli", 0.0),
                         disease_hours_now=row.get("disease_hours", 0.0),
                     )
+                    for item in result["now"]:
+                        store.append_advice(ADVICE_PATH, timestamp, "current", item)
+
                     upcoming = {item["rule"]: item for item in result["upcoming"]}
+                    for item in upcoming.values():
+                        store.append_advice(ADVICE_PATH, timestamp, "forecast", item)
+
                     if upcoming:
                         print("   ~> EARLY WARNING (next 3 h):")
                     for name, item in upcoming.items():
