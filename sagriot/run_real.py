@@ -1,7 +1,7 @@
 import time
 
 from .config import PLANT, LOG_PATH, READ_INTERVAL_SECONDS
-from .features import DailyLight, DiseaseHours, enrich_row
+from .features import DailyLight, DiseaseHours, FreshnessTracker, enrich_row
 from .rules import rules, get_thresholds
 from .advise import (CONTEXT, load_recent, build_forecasters,
                      forecast_channels, build_future_rows, advise as make_advice)
@@ -28,6 +28,7 @@ def main():
     light = DailyLight()
     rh_trigger, vpd_trigger = disease_triggers(PLANT)
     disease = DiseaseHours(rh_trigger, vpd_trigger)
+    freshness = FreshnessTracker()
     print(f"[run_real] plant={PLANT}  disease trigger: RH>{rh_trigger}  VPD<{vpd_trigger}")
     print(f"[run_real] logging to {LOG_PATH} every {READ_INTERVAL_SECONDS} s")
 
@@ -45,6 +46,8 @@ def main():
         print(f"\n{timestamp:%Y-%m-%d %H:%M:%S}")
         for channel, value in sorted(row.items()):
             print(f"   {channel:14s} {value}")
+        for channel, problem in freshness.check(measured):
+            print(f"   ! {channel}: {problem}")   
         recommendations = rules(row, PLANT)
         if not recommendations:
             print("   -> no recommendations")

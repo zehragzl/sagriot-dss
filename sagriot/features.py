@@ -2,6 +2,8 @@ import math
 
 MAX_GAP_SECONDS = 3600
 MIN_DLI_COVERAGE = 0.9
+STUCK_REPEATS = 60
+WATCHED_CHANNELS = ("air_temp", "air_humidity", "co2", "lux")
 
 
 def compute_vpd(air_temp, air_humidity):
@@ -84,3 +86,27 @@ def enrich_row(timestamp, measured, light, disease):
             timestamp, row["air_humidity"], row["vpd"], row.get("air_temp")
         )
     return row
+
+class FreshnessTracker:
+    def __init__(self, stuck_repeats=STUCK_REPEATS, channels=WATCHED_CHANNELS):
+        self.stuck_repeats = stuck_repeats
+        self.channels = channels
+        self._last = {}
+        self._repeats = {}
+
+    def check(self, row):
+        issues = []
+        for channel in self.channels:
+            if channel not in row:
+                continue
+            value = row[channel]
+            if channel in self._last and value == self._last[channel]:
+                self._repeats[channel] = self._repeats.get(channel, 0) + 1
+            else:
+                if self._repeats.get(channel, 0) >= self.stuck_repeats:
+                    issues.append((channel, "recovered"))
+                self._repeats[channel] = 0
+            self._last[channel] = value
+            if self._repeats[channel] == self.stuck_repeats:
+                issues.append((channel, f"stuck at {value} for {self.stuck_repeats + 1} readings"))
+        return issues

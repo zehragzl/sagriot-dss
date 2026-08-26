@@ -8,6 +8,7 @@ TZ_NAME = "Europe/Berlin"
 
 PLANT = "tomato"
 LOG_PATH = "data/real_log.csv"
+ADVICE_PATH = "data/advice_log.csv"
 READ_INTERVAL_SECONDS = 30
 
 FORECASTERS = {
