@@ -1,0 +1,11 @@
+# Core — needed on any machine that runs the rule engine, the advice layer,
+# the evaluation harness or the figures.
+numpy
+pandas
+matplotlib
+
+# Zero-shot forecasting. Only required for the channels configured to use a
+# Chronos model in config.FORECASTERS; the system falls back to persistence
+# if these are missing.
+torch
+chronos-forecasting

@@ -1,8 +1,13 @@
 import numpy as np
+import pandas as pd
 
 from .plants import PLANTS
 from .rules import get_thresholds, classify, rules, CRIT_LOW, CRIT_HIGH, NORMAL
 from .forecasters import (Persistence, SeasonalNaive, DampedTrend, DrivenDrying)
+from .advise import (CONTEXT, HORIZON, MEASURED, STEP_MINUTES, LEAD_MINUTES,
+                     build_forecasters, forecast_channels, build_future_rows,
+                     advise, current_row)
+from .config import VWC_FIELD_CAPACITY
 
 HEALTHY = {"air_temp": 24, "air_humidity": 70, "vpd": 0.65, "co2": 900, "par": 400,
            "dli": 30, "local_hour": 19, "soil_fc": 75, "soil_temp": 19,
@@ -16,6 +21,94 @@ STRESSED = {"air_temp": 29.0, "air_humidity": 88, "vpd": 1.15, "co2": 950, "par"
 def check(name, condition):
     print(f"  {'OK  ' if condition else 'FAIL'}  {name}")
     return condition
+
+
+def _synthetic_frame():
+    index = pd.date_range("2026-08-01 12:00", periods=CONTEXT, freq=f"{STEP_MINUTES}min",
+                          tz="Europe/Berlin")
+    return pd.DataFrame({
+        "air_temp":     np.linspace(20.0, 24.0, CONTEXT),
+        "air_humidity": np.linspace(70.0, 50.0, CONTEXT),
+        "co2":          np.full(CONTEXT, 450.0),
+        "par":          np.linspace(0.0, 300.0, CONTEXT),
+        "soil_vwc":     np.linspace(50.0, 46.0, CONTEXT),
+        "soil_temp":    np.full(CONTEXT, 20.0),
+        "ec":           np.full(CONTEXT, 1.5),
+    }, index=index)
+
+
+def advise_checks():
+    ok = True
+    frame = _synthetic_frame()
+
+    mapping = {channel: "persistence" for channel in MEASURED}
+    mapping["soil_vwc"] = "driven_drying_vpd"
+    forecasters = build_forecasters(mapping)
+    ok &= check("build_forecasters covers every measured channel",
+                all(channel in forecasters for channel in MEASURED))
+
+    predictions = forecast_channels(frame, forecasters)
+    ok &= check("forecast_channels derives vpd", "vpd" in predictions)
+    ok &= check("forecast_channels covers soil_vwc",
+                len(predictions.get("soil_vwc", [])) == HORIZON)
+
+    rows = build_future_rows(frame.index[-1], predictions, dli_now=2.0, disease_hours_now=0.0)
+    ok &= check("future rows match the horizon", len(rows) == HORIZON)
+    ok &= check("first row is one step ahead", rows[0]["minutes_ahead"] == STEP_MINUTES)
+    ok &= check("last row is at the horizon", rows[-1]["minutes_ahead"] == HORIZON * STEP_MINUTES)
+    ok &= check("timestamps increase", all(rows[i]["timestamp"] < rows[i + 1]["timestamp"]
+                                           for i in range(len(rows) - 1)))
+    ok &= check("soil_fc derived from forecast vwc", "soil_fc" in rows[0])
+    ok &= check("dli carries forward, not reset", rows[0]["dli"] >= 2.0)
+    ok &= check("dli accumulates over the horizon", rows[-1]["dli"] >= rows[0]["dli"])
+    ok &= check("disease_hours stays non-negative", all(r["disease_hours"] >= 0 for r in rows))
+
+    result = advise(frame, rows, "tomato")
+    ok &= check("advise returns now and upcoming",
+                set(result) == {"now", "upcoming"})
+
+    dry = frame.copy()
+    dry["soil_vwc"] = 40.0
+    dry_rows = []
+    for row in rows:
+        copy = dict(row)
+        copy["soil_vwc"] = 39.0
+        copy["soil_fc"] = round(39.0 / VWC_FIELD_CAPACITY * 100, 1)
+        dry_rows.append(copy)
+    dry_result = advise(dry, dry_rows, "tomato")
+    dry_active = {item["rule"] for item in dry_result["now"]}
+    dry_upcoming = {item["rule"] for item in dry_result["upcoming"]}
+    ok &= check("already-dry soil triggers Irrigation now", "Irrigation" in dry_active)
+    ok &= check("an active rule is not repeated as upcoming",
+                "Irrigation" not in dry_upcoming)
+
+    wet = frame.copy()
+    wet["soil_vwc"] = 50.0
+    falling = []
+    for index, row in enumerate(rows):
+        copy = dict(row)
+        value = 50.0 - 0.2 * (index + 1)
+        copy["soil_vwc"] = value
+        copy["soil_fc"] = round(value / VWC_FIELD_CAPACITY * 100, 1)
+        falling.append(copy)
+    forward = advise(wet, falling, "tomato")
+    ok &= check("a future crossing is detected as upcoming",
+                "Irrigation" in {item["rule"] for item in forward["upcoming"]})
+    ok &= check("that rule is not active yet",
+                "Irrigation" not in {item["rule"] for item in forward["now"]})
+
+    for item in forward["upcoming"]:
+        expected = LEAD_MINUTES.get(item["rule"], 60)
+        ok &= check(f"{item['rule']}: lead time is {expected} min",
+                    item["lead_minutes"] == expected)
+        ok &= check(f"{item['rule']}: advise_now matches lead arithmetic",
+                    item["advise_now"] == (item["when_minutes"] - item["lead_minutes"] <= 0))
+
+    now = current_row(frame)
+    ok &= check("current_row computes vpd", "vpd" in now)
+    ok &= check("current_row uses the last reading",
+                abs(now["soil_vwc"] - frame["soil_vwc"].iloc[-1]) < 1e-9)
+    return ok
 
 
 def main():
@@ -60,6 +153,8 @@ def main():
 
     drying = DrivenDrying(("vpd",)).predict(history, 36, exog_past, exog_future)
     ok &= check("driven_drying is non-increasing", np.all(np.diff(drying) <= 1e-9))
+
+    ok &= advise_checks()
 
     print("\nPASSED" if ok else "\nFAILED")
     return 0 if ok else 1

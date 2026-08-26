@@ -1,0 +1,14 @@
+# Sensor node only. Install alongside requirements.txt on the Raspberry Pi.
+#
+#   pip install -r requirements.txt -r requirements-pi.txt
+#
+# torch on ARM:
+#   pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+pyserial
+adafruit-blinka
+adafruit-circuitpython-sht31d
+adafruit-circuitpython-scd4x
+adafruit-circuitpython-dps310
+adafruit-circuitpython-tsl2591
+adafruit-circuitpython-ds3231
