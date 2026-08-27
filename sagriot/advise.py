@@ -5,8 +5,8 @@ import pandas as pd
 
 from .config import FORECASTERS, LOG_PATH, PLANT, VWC_FIELD_CAPACITY
 from .features import compute_vpd
-from .forecasters import (Persistence, SeasonalNaive, DampedTrend,
-                          ChronosForecaster, DrivenDrying)
+from .forecasters import (QUANTILE_LEVELS, Persistence, SeasonalNaive, DampedTrend,
+                          ChronosForecaster, DrivenDrying, Ensemble)
 from .rules import rules
 
 STEP_MINUTES = 5
@@ -53,6 +53,11 @@ def make_forecaster(name):
         return DrivenDrying(("vpd",))
     if name == "driven_drying_vpd_par":
         return DrivenDrying(("vpd", "par"))
+    if name == "driven_drying_vpd_decay":
+        return DrivenDrying(("vpd",), decay=0.999)
+    if name == "ensemble_drying_chronos":
+        return Ensemble([DrivenDrying(("vpd",)),
+                         ChronosForecaster("amazon/chronos-bolt-tiny")])
     if name.startswith("chronos"):
         size = name.rsplit("_", 1)[-1]
         return ChronosForecaster(f"amazon/chronos-bolt-{size}")
@@ -72,11 +77,12 @@ def build_forecasters(mapping=None):
             continue
         try:
             forecaster = make_forecaster(name)
-            forecaster.predict([0.0] * CONTEXT, HORIZON)
+            forecaster.warm_up(CONTEXT, HORIZON)
             cache[name] = forecaster
             built[channel] = forecaster
         except Exception as error:
-            print(f"[advise] {channel}: {name} kullanilamiyor ({error}) - persistence'a dusuldu")
+            print(f"  [advise] {channel}: {name} unavailable ({error}) "
+                  f"- substituted persistence")
             built[channel] = Persistence()
     return built
 
@@ -101,6 +107,92 @@ def forecast_channels(frame, forecasters, horizon=HORIZON, context=CONTEXT):
             history["soil_vwc"], horizon, exog_past, exog_future
         )
     return predictions
+
+def forecast_scenarios(frame, forecasters, horizon=HORIZON, context=CONTEXT,
+                       levels=QUANTILE_LEVELS):
+    """One set of future channels per quantile level.
+
+    Each level is a self-consistent scenario: the tenth-percentile atmosphere
+    with the tenth-percentile soil trajectory, and so on. Feeding each of them
+    through the unchanged rule engine turns a single predicted crossing time
+    into a range, and the share of scenarios in which a rule fires is a usable
+    stand-in for how likely that crossing is.
+    """
+    history = {c: frame[c].to_numpy(dtype=float)[-context:] for c in frame.columns}
+    scenarios = {level: {} for level in levels}
+
+    for channel in DRIVEN_CHANNELS:
+        if channel in forecasters and channel in history:
+            bands = forecasters[channel].predict_quantiles(history[channel], horizon,
+                                                           levels=levels)
+            for level in levels:
+                scenarios[level][channel] = np.asarray(bands[level], dtype=float)
+
+    vpd_past = np.array([compute_vpd(t, h)
+                         for t, h in zip(history["air_temp"], history["air_humidity"])])
+    for level in levels:
+        channels = scenarios[level]
+        channels["vpd"] = np.array([compute_vpd(t, h) for t, h in
+                                    zip(channels["air_temp"], channels["air_humidity"])])
+
+    if "soil_vwc" in forecasters and "soil_vwc" in history:
+        ordered = sorted(levels)
+        median = ordered[len(ordered) // 2]
+        # The soil model is driven by the median atmosphere. Its own band comes
+        # from the residuals of its rate fit, not from driver uncertainty, so
+        # the reported spread is a lower bound on the true one.
+        exog_past = {"vpd": vpd_past, "par": history["par"]}
+        exog_future = {"vpd": scenarios[median]["vpd"], "par": scenarios[median]["par"]}
+        bands = forecasters["soil_vwc"].predict_quantiles(
+            history["soil_vwc"], horizon, exog_past, exog_future, levels
+        )
+        for level in levels:
+            scenarios[level]["soil_vwc"] = np.asarray(bands[level], dtype=float)
+    return scenarios
+
+
+def advise_range(frame, scenarios, plant=PLANT, dli_now=0.0, disease_hours_now=0.0,
+                 rh_trigger=85, vpd_trigger=0.3):
+    """Run the rule engine on every scenario and merge the answers.
+
+    The rules are untouched, exactly as in the point-forecast path. What changes
+    is that a warning now carries the earliest and latest time at which it could
+    arrive, and the fraction of scenarios that produced it at all.
+    """
+    last = frame.index[-1]
+    ordered = sorted(scenarios)
+    median = ordered[len(ordered) // 2]
+
+    per_level = {}
+    for level in ordered:
+        rows = build_future_rows(last, scenarios[level], dli_now, disease_hours_now,
+                                 rh_trigger=rh_trigger, vpd_trigger=vpd_trigger)
+        per_level[level] = advise(frame, rows, plant, dli_now, disease_hours_now)
+
+    times = {}
+    template = {}
+    for level in ordered:
+        for item in per_level[level]["upcoming"]:
+            times.setdefault(item["rule"], {})[level] = item["when_minutes"]
+            template.setdefault(item["rule"], item)
+
+    merged = []
+    for rule, seen in times.items():
+        base = dict(template[rule])
+        expected = seen.get(median, int(np.median(list(seen.values()))))
+        base.update({
+            "when_minutes": expected,
+            "earliest_minutes": min(seen.values()),
+            "latest_minutes": max(seen.values()),
+            "scenarios": f"{len(seen)}/{len(ordered)}",
+            "probability": round(len(seen) / len(ordered), 2),
+            "advise_now": expected - base["lead_minutes"] <= 0,
+        })
+        merged.append(base)
+
+    merged.sort(key=lambda r: r["earliest_minutes"])
+    return {"now": per_level[median]["now"], "upcoming": merged}
+
 
 def build_future_rows(last_timestamp, predictions, dli_now=0.0, disease_hours_now=0.0,
                       rh_trigger=85, vpd_trigger=0.3, horizon=HORIZON):
@@ -230,18 +322,24 @@ def score(issued, onsets, max_lead_minutes=180):
                             "warned": False, "lead_minutes": None})
     return pd.DataFrame(results)
 
+def _heading(text):
+    print(f"\n{text}")
+    print("-" * 78)
+
+
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "replay":
         issued, onsets = replay(LOG_PATH)
-        print(f"\nuretilen uyari: {len(issued)}, gercek tetiklenme: {len(onsets)}")
-        print()
+        _heading(f"Replay - {len(issued)} warnings issued, "
+                 f"{len(onsets)} rule activations actually occurred")
         print(score(issued, onsets).to_string(index=False))
         raise SystemExit
 
     frame = load_recent(LOG_PATH)
-    print(f"{len(frame)} nokta (gereken: {CONTEXT})")
-
     forecasters = build_forecasters()
+
+    _heading(f"Context - {len(frame)} points loaded, {CONTEXT} required")
+
     predictions = forecast_channels(frame, forecasters)
     rows = build_future_rows(frame.index[-1], predictions)
 
@@ -249,18 +347,33 @@ if __name__ == "__main__":
                "soil_vwc", "soil_fc", "dli", "disease_hours"]
     table = pd.DataFrame(rows)
     table = table[[c for c in columns if c in table.columns]]
-    print()
+
+    _heading("Forecast trajectory (point estimate, every 30 min)")
     print(table.iloc[::6].round(2).to_string(index=False))
+
     result = advise(frame, rows)
 
-    print("\n--- su an ---")
+    _heading("Active now")
     for item in result["now"] or [{"rule": "-", "status": "-", "action": "no recommendations"}]:
-        print(f"   [{item['status']}] {item['rule']}: {item['action']}")
+        print(f"  {item['status']:<14}{item['rule']:<22}{item['action']}")
 
-    print("\n--- gelecek 3 saat ---")
+    _heading("Next 3 hours - point estimate")
     if not result["upcoming"]:
-        print("   yeni bir esik gecisi ongorulmuyor")
+        print("  no new threshold crossing predicted")
     for item in result["upcoming"]:
-        flag = "SIMDI UYAR" if item["advise_now"] else f"{item['when_minutes'] - item['lead_minutes']} dk sonra uyar"
-        print(f"   {item['rule']}: {item['when_minutes']} dk sonra ({item['status']}) - {flag}")
-        raise SystemExit
+        action = ("ADVISE NOW" if item["advise_now"]
+                  else f"advise in {item['when_minutes'] - item['lead_minutes']} min")
+        print(f"  {item['rule']:<22}{item['when_minutes']:>4} min  "
+              f"{item['status']:<14}{action}")
+
+    scenarios = forecast_scenarios(frame, forecasters)
+    banded = advise_range(frame, scenarios)
+
+    _heading(f"Next 3 hours - across {len(scenarios)} scenarios")
+    if not banded["upcoming"]:
+        print("  no threshold crossing in any scenario")
+    for item in banded["upcoming"]:
+        print(f"  {item['rule']:<22}{item['when_minutes']:>4} min  "
+              f"[{item['earliest_minutes']:>3}-{item['latest_minutes']:>3}]  "
+              f"p {item['probability']:>4.0%}  "
+              f"fired in {item['scenarios']}")

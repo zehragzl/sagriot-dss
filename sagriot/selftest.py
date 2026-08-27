@@ -3,10 +3,11 @@ import pandas as pd
 
 from .plants import PLANTS
 from .rules import get_thresholds, classify, rules, CRIT_LOW, CRIT_HIGH, NORMAL
-from .forecasters import (Persistence, SeasonalNaive, DampedTrend, DrivenDrying)
+from .forecasters import (QUANTILE_LEVELS, Persistence, SeasonalNaive, DampedTrend,
+                          DrivenDrying, Ensemble)
 from .advise import (CONTEXT, HORIZON, MEASURED, STEP_MINUTES, LEAD_MINUTES,
                      build_forecasters, forecast_channels, build_future_rows,
-                     advise, current_row)
+                     forecast_scenarios, advise_range, advise, current_row)
 from .config import VWC_FIELD_CAPACITY
 
 HEALTHY = {"air_temp": 24, "air_humidity": 70, "vpd": 0.65, "co2": 900, "par": 400,
@@ -104,6 +105,26 @@ def advise_checks():
         ok &= check(f"{item['rule']}: advise_now matches lead arithmetic",
                     item["advise_now"] == (item["when_minutes"] - item["lead_minutes"] <= 0))
 
+    scenarios = forecast_scenarios(frame, forecasters)
+    ok &= check("one scenario per quantile level", set(scenarios) == set(QUANTILE_LEVELS))
+    ok &= check("every scenario carries soil_vwc and vpd",
+                all("soil_vwc" in s and "vpd" in s for s in scenarios.values()))
+    low, high = scenarios[min(QUANTILE_LEVELS)], scenarios[max(QUANTILE_LEVELS)]
+    ok &= check("the dry scenario is never wetter than the wet one",
+                np.all(low["soil_vwc"] <= high["soil_vwc"] + 1e-9))
+
+    banded = advise_range(wet, {level: {**channels,
+                                        "soil_vwc": np.array([50.0 - 0.2 * (i + 1)
+                                                              for i in range(HORIZON)])}
+                                for level, channels in scenarios.items()}, "tomato")
+    ok &= check("advise_range returns now and upcoming",
+                set(banded) == {"now", "upcoming"})
+    for item in banded["upcoming"]:
+        ok &= check(f"{item['rule']}: earliest <= expected <= latest",
+                    item["earliest_minutes"] <= item["when_minutes"] <= item["latest_minutes"])
+        ok &= check(f"{item['rule']}: probability in (0, 1]",
+                    0 < item["probability"] <= 1)
+
     now = current_row(frame)
     ok &= check("current_row computes vpd", "vpd" in now)
     ok &= check("current_row uses the last reading",
@@ -145,14 +166,41 @@ def main():
     history = np.linspace(60, 50, 288)
     exog_past = {"vpd": np.linspace(1.0, 1.4, 288), "par": np.linspace(0, 400, 288)}
     exog_future = {"vpd": np.full(36, 1.2), "par": np.full(36, 200.0)}
-    for model in [Persistence(), SeasonalNaive(288), DampedTrend(),
-                  DrivenDrying(("vpd",)), DrivenDrying(("vpd", "par"))]:
+    models = [Persistence(), SeasonalNaive(288), DampedTrend(),
+              DrivenDrying(("vpd",)), DrivenDrying(("vpd", "par")),
+              DrivenDrying(("vpd",), decay=0.99),
+              Ensemble([Persistence(), DrivenDrying(("vpd",))])]
+    for model in models:
         out = model.predict(history, 36, exog_past, exog_future)
         ok &= check(f"{model.name}: returns 36 finite values",
                     len(out) == 36 and np.all(np.isfinite(out)))
 
+        bands = model.predict_quantiles(history, 36, exog_past, exog_future)
+        ok &= check(f"{model.name}: a band for every level",
+                    set(bands) == set(QUANTILE_LEVELS))
+        ok &= check(f"{model.name}: bands are the right length and finite",
+                    all(len(b) == 36 and np.all(np.isfinite(b)) for b in bands.values()))
+        ordered = [bands[level] for level in sorted(bands)]
+        ok &= check(f"{model.name}: quantiles never cross",
+                    all(np.all(ordered[i] <= ordered[i + 1] + 1e-9)
+                        for i in range(len(ordered) - 1)))
+
+    flat = Persistence().predict_quantiles(history, 36)
+    ok &= check("persistence has no spread - it can never cross a threshold",
+                np.allclose(flat[min(QUANTILE_LEVELS)], flat[max(QUANTILE_LEVELS)]))
+
+    spread = DrivenDrying(("vpd",)).predict_quantiles(history, 36, exog_past, exog_future)
+    width = spread[max(QUANTILE_LEVELS)] - spread[min(QUANTILE_LEVELS)]
+    ok &= check("driven_drying band widens with the horizon", width[-1] > width[0])
+
     drying = DrivenDrying(("vpd",)).predict(history, 36, exog_past, exog_future)
     ok &= check("driven_drying is non-increasing", np.all(np.diff(drying) <= 1e-9))
+    ok &= check("no scenario rises above the last observation",
+                np.all(spread[max(QUANTILE_LEVELS)] <= history[-1] + 1e-9))
+
+    without_exog = DrivenDrying(("vpd",)).predict(history, 36)
+    ok &= check("driven_drying falls back to persistence without drivers",
+                np.allclose(without_exog, history[-1]))
 
     ok &= advise_checks()
 

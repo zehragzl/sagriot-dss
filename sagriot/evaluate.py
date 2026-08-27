@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 
 from .forecasters import (Persistence, SeasonalNaive, DampedTrend,
-                          ChronosForecaster, DrivenDrying)
+                          ChronosForecaster, DrivenDrying, Ensemble)
 from .features import compute_vpd
 
 
@@ -104,7 +104,7 @@ def evaluate(frame, target, models, context, horizon, step, season,
 
     for model in models:
         try:
-            model.predict(values[:context], horizon)
+            model.warm_up(context, horizon)
         except Exception:
             pass
 
@@ -196,14 +196,14 @@ if __name__ == "__main__":
 
     frame = load_frame(path, channels_for(path), resample=RESAMPLE)
     values = frame[channel].to_numpy(dtype=float)
-    print(f"{channel}: {len(frame)} nokta, {frame.index[0]} -> {frame.index[-1]}")
+    print(f"{channel}: {len(frame)} points, {frame.index[0]} -> {frame.index[-1]}")
 
     THRESHOLD = None
     DIRECTION = "below"
     if channel in CROSSINGS:
         quantile, DIRECTION = CROSSINGS[channel]
         THRESHOLD = float(np.quantile(values, quantile))
-        print(f"esik: {THRESHOLD:.1f} ({DIRECTION})")
+        print(f"evaluation level: {THRESHOLD:.1f} ({DIRECTION})")
 
     models = [
         Persistence(),
@@ -212,7 +212,17 @@ if __name__ == "__main__":
         ChronosForecaster("amazon/chronos-bolt-tiny"),
     ]
     if channel in SOIL_MOISTURE:
-        models += [DrivenDrying(("vpd",)), DrivenDrying(("vpd", "par"))]
+        models += [
+            DrivenDrying(("vpd",)),
+            DrivenDrying(("vpd", "par")),
+            # Recency weighting was measured and did not help: within a 24 h
+            # context the drying rate is effectively constant, so there is
+            # nothing for the weights to track. Kept here, out of the production
+            # benchmark, so the negative result stays reproducible.
+            DrivenDrying(("vpd",), decay=0.99),
+            Ensemble([DrivenDrying(("vpd",)),
+                      ChronosForecaster("amazon/chronos-bolt-tiny")]),
+        ]
 
     results = evaluate(frame, channel, models, CONTEXT, HORIZON, STRIDE, SEASON,
                        threshold=THRESHOLD, direction=DIRECTION, drivers=("vpd", "par"))

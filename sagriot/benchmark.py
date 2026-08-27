@@ -6,7 +6,7 @@ import pandas as pd
 from .evaluate import (load_frame, evaluate, summarise,
                        channels_for, CROSSINGS, SOIL_MOISTURE)
 from .forecasters import (Persistence, SeasonalNaive, DampedTrend,
-                          ChronosForecaster, DrivenDrying)
+                          ChronosForecaster, DrivenDrying, Ensemble)
 
 RESAMPLE = "5min"
 STEP_MINUTES = 5
@@ -25,14 +25,21 @@ def run(paths):
         ChronosForecaster("amazon/chronos-bolt-tiny"),
         ChronosForecaster("amazon/chronos-bolt-small"),
     ]
-    driven_models = [DrivenDrying(("vpd",)), DrivenDrying(("vpd", "par"))]
+    driven_models = [
+        DrivenDrying(("vpd",)),
+        DrivenDrying(("vpd", "par")),
+        Ensemble([DrivenDrying(("vpd",)),
+                  ChronosForecaster("amazon/chronos-bolt-tiny")]),
+    ]
 
     collected = []
     for path in paths:
         dataset = os.path.basename(path).replace(".csv", "")
         channels = channels_for(path)
         frame = load_frame(path, channels, resample=RESAMPLE)
-        print(f"\n########## {dataset} — {len(frame)} nokta ##########")
+        print(f"\n{'=' * 78}")
+        print(f"  {dataset} - {len(frame)} points, {len(channels)} channels")
+        print("=" * 78)
 
         for channel in channels:
             values = frame[channel].to_numpy(dtype=float)
@@ -50,9 +57,10 @@ def run(paths):
                                direction=direction, drivers=DRIVERS)
             table = summarise(results, STEP_MINUTES)
 
-            print(f"\n--- {dataset} / {channel} ---")
+            print(f"\n{dataset} / {channel}")
+            print("-" * 78)
             if threshold is not None:
-                print(f"esik: {threshold:.1f} ({direction})")
+                print(f"evaluation level: {threshold:.1f} ({direction})")
             print(table.to_string())
 
             tidy = table.reset_index()

@@ -28,7 +28,7 @@ sensors ──► store (raw log) ──► features ──► rules ──► r
 | `store.py` | Appends raw readings and issued advice to CSV |
 | `run_real.py` | Live loop: read every 30 s, forecast every 10 min |
 | `advise.py` | Forecast → future rows → rules → earliest crossing → lead-time decision |
-| `forecasters.py` | Persistence, seasonal naive, damped trend, driven drying, Chronos |
+| `forecasters.py` | Persistence, seasonal naive, damped trend, driven drying, Chronos, ensemble — each with a predictive band |
 | `evaluate.py` | Rolling-origin evaluation with signal-level and decision-level metrics |
 | `benchmark.py` | Runs the evaluation across datasets and channels |
 | `measure.py` | Inference latency and memory on the target hardware |
@@ -173,9 +173,9 @@ Details, figures and honest limitations are in the internship report.
   needed at longer deployment horizons.
 - DLI and disease-hour accumulators reset on restart. The coverage check suppresses DLI
   rather than reporting an incomplete value, so this degrades safely.
-- `TimesFMForecaster` and `MoiraiForecaster` are deliberate placeholders. The covariate
-  hypothesis they would test was evaluated with the lightweight `DrivenDrying` model
-  instead; neither was pursued further.
+- TimesFM and Moirai were considered and not implemented. The capability that made Moirai
+  interesting — accepting exogenous covariates — was tested directly with the lightweight
+  `DrivenDrying` model instead, so neither was pursued.
 
 ---
 

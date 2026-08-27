@@ -4,7 +4,7 @@ from .config import PLANT, LOG_PATH, ADVICE_PATH, READ_INTERVAL_SECONDS
 from .features import DailyLight, DiseaseHours, FreshnessTracker, enrich_row
 from .rules import rules, get_thresholds
 from .advise import (CONTEXT, load_recent, build_forecasters,
-                     forecast_channels, build_future_rows, advise as make_advice)
+                     forecast_scenarios, advise_range)
 from . import store
 
 FORECAST_INTERVAL_SECONDS = 600
@@ -47,7 +47,7 @@ def main():
         for channel, value in sorted(row.items()):
             print(f"   {channel:14s} {value}")
         for channel, problem in freshness.check(measured):
-            print(f"   ! {channel}: {problem}")   
+            print(f"   ! {channel}: {problem}")
         recommendations = rules(row, PLANT)
         if not recommendations:
             print("   -> no recommendations")
@@ -59,17 +59,12 @@ def main():
             try:
                 recent = load_recent(LOG_PATH)
                 if len(recent) >= CONTEXT:
-                    predictions = forecast_channels(recent, forecasters)
-                    future = build_future_rows(
-                        recent.index[-1], predictions,
+                    scenarios = forecast_scenarios(recent, forecasters)
+                    result = advise_range(
+                        recent, scenarios, PLANT,
                         dli_now=row.get("dli", 0.0),
                         disease_hours_now=row.get("disease_hours", 0.0),
                         rh_trigger=rh_trigger, vpd_trigger=vpd_trigger,
-                    )
-                    result = make_advice(
-                        recent, future, PLANT,
-                        dli_now=row.get("dli", 0.0),
-                        disease_hours_now=row.get("disease_hours", 0.0),
                     )
                     for item in result["now"]:
                         store.append_advice(ADVICE_PATH, timestamp, "current", item)
@@ -86,15 +81,17 @@ def main():
                         when = "ADVISE NOW" if item["advise_now"] else \
                                f"advise in {item['when_minutes'] - item['lead_minutes']} min"
                         print(f"      {item['rule']:24s} in {item['when_minutes']:3d} min "
+                              f"[{item['earliest_minutes']}-{item['latest_minutes']}, "
+                              f"p={item['probability']:.0%}] "
                               f"({item['status']}) — {when}{mark}")
                     for name in list(announced):
                         if name not in upcoming:
                             print(f"      {name:24s} no longer forecast")
                             del announced[name]
                 else:
-                    print(f"   ~> tahmin icin yeterli gecmis yok ({len(recent)}/{CONTEXT})")
+                    print(f"   ~> not enough history yet ({len(recent)}/{CONTEXT})")
             except Exception as error:
-                print(f"   ~> tahmin basarisiz: {error}")
+                print(f"   ~> forecast failed: {type(error).__name__}: {error}")
 
         elapsed = time.monotonic() - started
         time.sleep(max(0.0, READ_INTERVAL_SECONDS - elapsed))
