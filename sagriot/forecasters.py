@@ -80,9 +80,8 @@ class DampedTrend(Forecaster):
                         best = (error, level, trend, phi)
         return best
 
-    def predict(self, history, horizon, exog_past=None, exog_future=None):
-        history = np.asarray(history, dtype=float)
-        _, level, trend, phi = self._best(history)
+    @staticmethod
+    def _extrapolate(level, trend, phi, horizon):
         out = np.empty(horizon, dtype=float)
         cumulative = 0.0
         for step in range(horizon):
@@ -90,11 +89,18 @@ class DampedTrend(Forecaster):
             out[step] = level + cumulative * trend
         return out
 
+    def predict(self, history, horizon, exog_past=None, exog_future=None):
+        history = np.asarray(history, dtype=float)
+        _, level, trend, phi = self._best(history)
+        return self._extrapolate(level, trend, phi, horizon)
+
     def predict_quantiles(self, history, horizon, exog_past=None, exog_future=None,
                           levels=QUANTILE_LEVELS):
         history = np.asarray(history, dtype=float)
+        # The grid search is the whole cost of this method, so it is run once
+        # and the point forecast is built from the same fit.
         error, level, trend, phi = self._best(history)
-        point = self.predict(history, horizon)
+        point = self._extrapolate(level, trend, phi, horizon)
         sigma = np.sqrt(error / max(1, len(history) - 1))
         steps = np.sqrt(np.arange(1, horizon + 1, dtype=float))
         return {q: point + NormalDist().inv_cdf(q) * sigma * steps for q in levels}
