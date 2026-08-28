@@ -30,7 +30,37 @@ CROSSINGS = {
     "ec":           (0.85, "above"),
 }
 
+# A percentile is how each level was first derived. The value is then frozen,
+# because a level recomputed from the data moves whenever the record grows: on
+# the testbed log the soil-moisture level fell from 46.15 to 40.73 when two
+# further days were added, which silently changed the event set and made the
+# two runs incomparable. The values below were derived on the record as it
+# stood on 26 August 2026, the version the reported results were produced from.
+FROZEN_LEVELS = {
+    "real": {
+        "air_temp":     24.74,
+        "air_humidity": 62.46,
+        "soil_vwc":     46.15,
+        "soil_temp":    18.20,
+        "ec":            0.23,
+    },
+    "wageningen": {},
+}
+
 SOIL_MOISTURE = ("soil_fc", "soil_vwc")
+
+
+def level_for(path, channel, values):
+    """Returns (level, direction, source) for a channel, or (None, ..., None)."""
+    if channel not in CROSSINGS:
+        return None, "below", None
+    quantile, direction = CROSSINGS[channel]
+    header = pd.read_csv(path, nrows=0)
+    kind = "real" if "timestamp" in header.columns else "wageningen"
+    frozen = FROZEN_LEVELS.get(kind, {}).get(channel)
+    if frozen is not None:
+        return float(frozen), direction, "frozen"
+    return float(np.quantile(values, quantile)), direction, f"p{int(quantile * 100)}"
 
 
 def load_wageningen(path, channel, resample=None):
@@ -198,12 +228,9 @@ if __name__ == "__main__":
     values = frame[channel].to_numpy(dtype=float)
     print(f"{channel}: {len(frame)} points, {frame.index[0]} -> {frame.index[-1]}")
 
-    THRESHOLD = None
-    DIRECTION = "below"
-    if channel in CROSSINGS:
-        quantile, DIRECTION = CROSSINGS[channel]
-        THRESHOLD = float(np.quantile(values, quantile))
-        print(f"evaluation level: {THRESHOLD:.1f} ({DIRECTION})")
+    THRESHOLD, DIRECTION, SOURCE = level_for(path, channel, values)
+    if THRESHOLD is not None:
+        print(f"evaluation level: {THRESHOLD:.2f} ({DIRECTION}, {SOURCE})")
 
     models = [
         Persistence(),

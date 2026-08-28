@@ -1,3 +1,4 @@
+from .config import PAR_DAY_THRESHOLD, DISEASE_HOURS_TRIGGER, DAY_END_HOUR
 from .plants import PLANTS, PARAMS, PLAUSIBLE
 
 def get_thresholds(plant, stage="default"):
@@ -56,9 +57,9 @@ def _rec(rule, signals, action, level=None):
 
 def _band(row, base):
     """Pick the day or night band of a parameter based on light."""
-    return f"{base}_day" if row.get("par", 0) > 10 else f"{base}_night"
+    day = row.get("par", 0) > PAR_DAY_THRESHOLD
+    return f"{base}_day" if day else f"{base}_night"
 
-DISEASE_HOURS_TRIGGER = 2.0
 
 def _usable(row):
     clean = {}
@@ -132,10 +133,10 @@ def rules(row, plant, stage="default"):
     if "dli" in row:
         b = th["dli"]
         lv = classify(row["dli"], b)
-        if lv > 0 and row.get("par", 0) > 10:
+        if lv > 0 and row.get("par", 0) > PAR_DAY_THRESHOLD:
             recs.append(_rec("Lighting", [("dli", row["dli"], lv)],
                              "Shade or reduce supplemental lighting"))
-        elif lv < 0 and row.get("local_hour", 24) >= 18:
+        elif lv < 0 and row.get("local_hour", 24) >= DAY_END_HOUR:
             recs.append(_rec("Lighting", [("dli", row["dli"], lv)],
                              "Add supplemental light"))
 

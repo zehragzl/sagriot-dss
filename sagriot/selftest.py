@@ -159,6 +159,18 @@ def main():
     per_plant = {p: len(rules(STRESSED, p)) for p in PLANTS}
     ok &= check(f"same row differs by plant {per_plant}", len(set(per_plant.values())) > 1)
 
+    from .rules import _band
+    from .config import PAR_DAY_THRESHOLD, DISEASE_HOURS_TRIGGER, DAY_END_HOUR
+    ok &= check("day band above the configured PAR threshold",
+                _band({"par": PAR_DAY_THRESHOLD + 1}, "air_temp") == "air_temp_day")
+    ok &= check("night band below it",
+                _band({"par": PAR_DAY_THRESHOLD - 1}, "air_temp") == "air_temp_night")
+    ok &= check("a missing PAR reading falls back to the night band",
+                _band({}, "air_temp") == "air_temp_night")
+    ok &= check("rule policy constants live in config, not in rules",
+                all(isinstance(v, (int, float))
+                    for v in (PAR_DAY_THRESHOLD, DISEASE_HOURS_TRIGGER, DAY_END_HOUR)))
+
     ok &= check("missing channels do not raise", rules({"local_hour": 12}, "tomato") == [])
     ok &= check("NaN is dropped", rules({**HEALTHY, "soil_fc": float("nan")}, "tomato") == [])
     ok &= check("implausible value is dropped", rules({**HEALTHY, "soil_temp": -40}, "tomato") == [])

@@ -4,7 +4,7 @@ import sys
 import pandas as pd
 
 from .evaluate import (load_frame, evaluate, summarise,
-                       channels_for, CROSSINGS, SOIL_MOISTURE)
+                       channels_for, level_for, SOIL_MOISTURE)
 from .forecasters import (Persistence, SeasonalNaive, DampedTrend,
                           ChronosForecaster, DrivenDrying, Ensemble)
 
@@ -43,10 +43,7 @@ def run(paths):
 
         for channel in channels:
             values = frame[channel].to_numpy(dtype=float)
-            threshold, direction = None, "below"
-            if channel in CROSSINGS:
-                quantile, direction = CROSSINGS[channel]
-                threshold = float(pd.Series(values).quantile(quantile))
+            threshold, direction, source = level_for(path, channel, values)
 
             models = list(base_models)
             if channel in SOIL_MOISTURE:
@@ -60,7 +57,7 @@ def run(paths):
             print(f"\n{dataset} / {channel}")
             print("-" * 78)
             if threshold is not None:
-                print(f"evaluation level: {threshold:.1f} ({direction})")
+                print(f"evaluation level: {threshold:.2f} ({direction}, {source})")
             print(table.to_string())
 
             tidy = table.reset_index()
@@ -73,7 +70,7 @@ def run(paths):
     names = "_".join(os.path.basename(p).replace(".csv", "") for p in paths)
     out_path = f"results/benchmark_{names}.csv"
     combined.to_csv(out_path, index=False)
-    print(f"\nkaydedildi: {out_path}")
+    print(f"\nwritten: {out_path}")
     return combined
 
 

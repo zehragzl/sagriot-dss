@@ -22,7 +22,7 @@ sensors ──► store (raw log) ──► features ──► rules ──► r
 | Module | Responsibility |
 |---|---|
 | `plants.py` | Threshold tables for tomato, cucumber, strawberry; parameter metadata; plausibility ranges |
-| `rules.py` | Seven decision rules. Plant-independent logic — contains no numeric thresholds |
+| `rules.py` | Seven decision rules. Plant-independent logic — no crop or site thresholds; both live in `plants.py` and `config.py` |
 | `sensors.py` | Five I²C sensors plus an RS485 soil probe, each read behind its own error guard |
 | `features.py` | Derived channels (VPD, DLI, disease-hours) and stuck-sensor detection |
 | `store.py` | Appends raw readings and issued advice to CSV |
@@ -122,6 +122,9 @@ Everything site-specific is in `config.py`.
 | `PLANT` | Which threshold table the rules use |
 | `VWC_FIELD_CAPACITY` | Volumetric water content at field capacity, measured once per pot or slab. Until it is set, `soil_fc` is not reported and the moisture rules stay silent |
 | `LUX_TO_PAR` | Lux-to-PAR conversion. An approximation — see limitations |
+| `PAR_DAY_THRESHOLD` | Above this PAR a reading is judged against the day band, below it against the night band. Site-dependent: on the office testbed PAR passed 10 once in 25,676 readings, so every daytime reading was judged against night limits |
+| `DISEASE_HOURS_TRIGGER` | Accumulated favourable hours before the disease rule fires; twice this is critical |
+| `DAY_END_HOUR` | Hour after which a shortfall in the day's light budget can be reported |
 | `FORECASTERS` | Which method forecasts which channel |
 | `TZ_NAME`, `SOIL_PORT`, `SOIL_SLAVE_ID` | Hardware and locale |
 

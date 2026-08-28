@@ -3,11 +3,43 @@ import time
 from .config import PLANT, LOG_PATH, ADVICE_PATH, READ_INTERVAL_SECONDS
 from .features import DailyLight, DiseaseHours, FreshnessTracker, enrich_row
 from .rules import rules, get_thresholds
-from .advise import (CONTEXT, load_recent, build_forecasters,
+from .advise import (CONTEXT, HORIZON, STEP_MINUTES, load_recent, build_forecasters,
                      forecast_scenarios, advise_range)
 from . import store
 
 FORECAST_INTERVAL_SECONDS = 600
+HORIZON_MINUTES = HORIZON * STEP_MINUTES
+
+
+def show_upcoming(upcoming, age_minutes, announced, fresh):
+    """Print the standing early warning, counted down to the present reading.
+
+    The forecast is recomputed every FORECAST_INTERVAL_SECONDS, but it is shown
+    on every reading, with the remaining time reduced by however long ago it was
+    computed. Nothing is recomputed here; only the clock moves.
+    """
+    if not upcoming:
+        return
+
+    age = int(round(age_minutes))
+    when = "next 3 h" if fresh else f"computed {age} min ago"
+    print(f"   ~> EARLY WARNING ({when}):")
+
+    for name, item in upcoming.items():
+        remaining = max(0, item["when_minutes"] - age)
+        earliest = max(0, item["earliest_minutes"] - age)
+        latest = max(0, item["latest_minutes"] - age)
+        advise_now = remaining - item["lead_minutes"] <= 0
+
+        mark = "  *NEW*" if fresh and announced.get(name) != advise_now else ""
+        if fresh:
+            announced[name] = advise_now
+
+        action = "ADVISE NOW" if advise_now else f"advise in {remaining - item['lead_minutes']} min"
+        due = "due" if remaining == 0 else f"in {remaining:3d} min"
+        print(f"      {item['rule']:24s} {due} "
+              f"[{earliest}-{latest}, p={item['probability']:.0%}] "
+              f"({item['status']}) — {action}{mark}")
 
 
 def disease_triggers(plant):
@@ -35,6 +67,8 @@ def main():
     forecasters = build_forecasters()
     announced = {}
     last_forecast = 0.0
+    pending = {}
+    pending_at = None
 
     while True:
         started = time.monotonic()
@@ -54,6 +88,7 @@ def main():
         for rec in recommendations:
             print(f"   -> [{rec['status']}] {rec['rule']}: {rec['action']}")
 
+        fresh = False
         if time.monotonic() - last_forecast >= FORECAST_INTERVAL_SECONDS:
             last_forecast = time.monotonic()
             try:
@@ -73,25 +108,24 @@ def main():
                     for item in upcoming.values():
                         store.append_advice(ADVICE_PATH, timestamp, "forecast", item)
 
-                    if upcoming:
-                        print("   ~> EARLY WARNING (next 3 h):")
-                    for name, item in upcoming.items():
-                        mark = "  *NEW*" if announced.get(name) != item["advise_now"] else ""
-                        announced[name] = item["advise_now"]
-                        when = "ADVISE NOW" if item["advise_now"] else \
-                               f"advise in {item['when_minutes'] - item['lead_minutes']} min"
-                        print(f"      {item['rule']:24s} in {item['when_minutes']:3d} min "
-                              f"[{item['earliest_minutes']}-{item['latest_minutes']}, "
-                              f"p={item['probability']:.0%}] "
-                              f"({item['status']}) — {when}{mark}")
                     for name in list(announced):
                         if name not in upcoming:
                             print(f"      {name:24s} no longer forecast")
                             del announced[name]
+
+                    pending, pending_at, fresh = upcoming, timestamp, True
                 else:
                     print(f"   ~> not enough history yet ({len(recent)}/{CONTEXT})")
             except Exception as error:
                 print(f"   ~> forecast failed: {type(error).__name__}: {error}")
+
+        # Shown on every reading, recomputed only every FORECAST_INTERVAL_SECONDS.
+        if pending and pending_at is not None:
+            age = (timestamp - pending_at).total_seconds() / 60
+            if age > HORIZON_MINUTES:
+                pending, pending_at, announced = {}, None, {}
+            else:
+                show_upcoming(pending, age, announced, fresh)
 
         elapsed = time.monotonic() - started
         time.sleep(max(0.0, READ_INTERVAL_SECONDS - elapsed))
