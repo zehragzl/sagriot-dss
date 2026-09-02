@@ -208,10 +208,13 @@ class TTMForecaster(Forecaster):
             import logging
             import torch
             from tsfm_public.toolkit.get_model import get_model
-            # One line per window would bury the benchmark table. Warnings and
-            # errors still come through.
-            for noisy in ("tsfm_public", "httpx", "transformers"):
-                logging.getLogger(noisy).setLevel(logging.WARNING)
+            # tsfm sets a level on each of its child loggers, so raising the
+            # parent is not enough - every existing one has to be walked.
+            # Warnings and errors still come through.
+            noisy = ("tsfm", "httpx", "httpcore", "transformers", "urllib3")
+            for name in list(logging.root.manager.loggerDict) + list(noisy):
+                if name.startswith(noisy):
+                    logging.getLogger(name).setLevel(logging.WARNING)
             model = get_model(self.model_path,
                               context_length=self.CONTEXT,
                               prediction_length=horizon)
