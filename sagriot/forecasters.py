@@ -205,8 +205,13 @@ class TTMForecaster(Forecaster):
 
     def _load(self, horizon):
         if horizon not in self._models:
+            import logging
             import torch
             from tsfm_public.toolkit.get_model import get_model
+            # One line per window would bury the benchmark table. Warnings and
+            # errors still come through.
+            for noisy in ("tsfm_public", "httpx", "transformers"):
+                logging.getLogger(noisy).setLevel(logging.WARNING)
             model = get_model(self.model_path,
                               context_length=self.CONTEXT,
                               prediction_length=horizon)
