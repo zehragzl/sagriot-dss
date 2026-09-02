@@ -236,8 +236,19 @@ class TTMForecaster(Forecaster):
         normalised = (window - centre) / scale
 
         tensor = torch.tensor(normalised, dtype=torch.float32).reshape(1, self.CONTEXT, 1)
+        model = self._load(horizon)
+
+        arguments = {"past_values": tensor.to(self.device)}
+        # Some TTM variants are frequency-prefix-tuned and refuse to run without
+        # a token naming the sampling rate. Five-minute data is not one of the
+        # frequencies they were tuned on, so token 0 -- the out-of-vocabulary
+        # bucket -- is the honest choice rather than claiming a resolution the
+        # model knows.
+        if getattr(model.config, "resolution_prefix_tuning", False):
+            arguments["freq_token"] = torch.zeros(1, dtype=torch.long).to(self.device)
+
         with torch.no_grad():
-            output = self._load(horizon)(past_values=tensor.to(self.device))
+            output = model(**arguments)
 
         prediction = getattr(output, "prediction_outputs", None)
         if prediction is None:
