@@ -219,7 +219,11 @@ if __name__ == "__main__":
 
     RESAMPLE = "5min"
     STEP_MINUTES = 5
-    CONTEXT = 24 * 60 // STEP_MINUTES
+    # Third argument overrides the context length. The reported results use 288
+    # (24 h). 512 exists for one diagnostic: TTM cannot accept 288 and is
+    # normally padded up to 512, so running everything at 512 shows whether
+    # that padding, rather than the model, is what loses.
+    CONTEXT = int(sys.argv[3]) if len(sys.argv) > 3 else 24 * 60 // STEP_MINUTES
     HORIZON = 3 * 60 // STEP_MINUTES
     STRIDE = 60 // STEP_MINUTES
     SEASON = 24 * 60 // STEP_MINUTES
@@ -227,6 +231,8 @@ if __name__ == "__main__":
     frame = load_frame(path, channels_for(path), resample=RESAMPLE)
     values = frame[channel].to_numpy(dtype=float)
     print(f"{channel}: {len(frame)} points, {frame.index[0]} -> {frame.index[-1]}")
+    print(f"context: {CONTEXT} steps ({CONTEXT * STEP_MINUTES / 60:.1f} h)"
+          + ("  [TTM padded from here to 512]" if CONTEXT < 512 else "  [TTM unpadded]"))
 
     THRESHOLD, DIRECTION, SOURCE = level_for(path, channel, values)
     if THRESHOLD is not None:
