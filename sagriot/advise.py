@@ -6,7 +6,7 @@ import pandas as pd
 from .config import FORECASTERS, LOG_PATH, PLANT, VWC_FIELD_CAPACITY
 from .features import compute_vpd
 from .forecasters import (QUANTILE_LEVELS, Persistence, SeasonalNaive, DampedTrend,
-                          ChronosForecaster, DrivenDrying, Ensemble)
+                          ChronosForecaster, DrivenDrying, Ensemble, TTMForecaster)
 from .rules import rules
 
 STEP_MINUTES = 5
@@ -58,6 +58,8 @@ def make_forecaster(name):
     if name == "ensemble_drying_chronos":
         return Ensemble([DrivenDrying(("vpd",)),
                          ChronosForecaster("amazon/chronos-bolt-tiny")])
+    if name == "ttm":
+        return TTMForecaster()
     if name.startswith("chronos"):
         size = name.rsplit("_", 1)[-1]
         return ChronosForecaster(f"amazon/chronos-bolt-{size}")

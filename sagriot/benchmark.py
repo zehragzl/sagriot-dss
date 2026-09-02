@@ -5,8 +5,8 @@ import pandas as pd
 
 from .evaluate import (load_frame, evaluate, summarise,
                        channels_for, level_for, SOIL_MOISTURE)
-from .forecasters import (Persistence, SeasonalNaive, DampedTrend,
-                          ChronosForecaster, DrivenDrying, Ensemble)
+from .forecasters import (Persistence, SeasonalNaive, ChronosForecaster,
+                          DrivenDrying, Ensemble, TTMForecaster)
 
 RESAMPLE = "5min"
 STEP_MINUTES = 5
@@ -18,10 +18,12 @@ DRIVERS = ("vpd", "par")
 
 
 def run(paths):
+    # Ordered by how much the method carries into the site: nothing, nothing,
+    # about a million pretrained parameters, then nine and forty-eight million.
     base_models = [
         Persistence(),
         SeasonalNaive(SEASON),
-        DampedTrend(),
+        TTMForecaster(),
         ChronosForecaster("amazon/chronos-bolt-tiny"),
         ChronosForecaster("amazon/chronos-bolt-small"),
     ]

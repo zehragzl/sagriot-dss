@@ -30,7 +30,10 @@ DISEASE_HOURS_TRIGGER = 2.0
 DAY_END_HOUR = 18
 
 FORECASTERS = {
-    "air_temp":     "damped_trend",       # chronos_tiny yerine
+    # damped_trend was selected here by measurement and has been dropped along
+    # with the method. This is an interim choice: chronos_tiny already holds the
+    # other two atmospheric channels. Re-check it against the next benchmark.
+    "air_temp":     "chronos_tiny",
     "air_humidity": "chronos_tiny",
     "par":          "persistence",        # chronos_tiny yerine
     "co2":          "persistence",

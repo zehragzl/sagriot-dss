@@ -52,6 +52,22 @@ class SeasonalNaive(Forecaster):
 
 
 class DampedTrend(Forecaster):
+    """Holt's linear trend with damping.
+
+    Two states are carried: where the signal is (level) and how fast it is
+    moving (trend). Each new observation updates both. To forecast, the trend
+    is added repeatedly but multiplied by phi < 1 at every step, so the
+    extrapolation bends flat instead of running away over a three-hour horizon.
+    Three parameters -- alpha, beta, phi -- chosen by grid search on the
+    context.
+
+    Dropped from the production benchmark: with driven drying at two fitted
+    coefficients and TTM at about a million pretrained ones, its three
+    parameters sat in a place on the ladder that produced no distinct
+    behaviour. Kept here so the choice can be re-measured rather than
+    re-argued.
+    """
+
     name = "damped_trend"
 
     ALPHAS = (0.1, 0.3, 0.5, 0.8)
@@ -154,6 +170,84 @@ class ChronosForecaster(Forecaster):
         if quantiles.ndim == 3:
             quantiles = quantiles[0]
         return {level: quantiles[:horizon, index] for index, level in enumerate(levels)}
+
+
+class TTMForecaster(Forecaster):
+    """IBM Granite Tiny Time Mixer — a pretrained model of about one million
+    parameters.
+
+    It sits between the two extremes this project compares. Driven drying fits
+    two coefficients on site; Chronos-Bolt holds nine to forty-eight million
+    pretrained ones. TTM is pretrained like Chronos but three orders of
+    magnitude smaller, so it tests the claim directly: if a one-million
+    parameter model cannot beat a two-coefficient physical model on the
+    irrigation decision, that is evidence about the decision, not about size.
+
+    One constraint is not negotiable. TTM only accepts a fixed input length
+    (512, 1024 or 1536 steps), while every other method here is given the same
+    288-step context. Rather than give TTM more history than the others -- which
+    would make the comparison meaningless -- the 288 steps are left-padded with
+    the oldest value up to 512. The padding carries no information, so all five
+    methods still see exactly the same twenty-four hours.
+
+    The model produces a point forecast only, so its predictive band stays
+    degenerate. That is reported rather than hidden: it means TTM cannot take
+    part in the scenario-based early warning.
+    """
+
+    CONTEXT = 512
+
+    def __init__(self, model_path="ibm-granite/granite-timeseries-ttm-r2", device="cpu"):
+        self.model_path = model_path
+        self.device = device
+        self.name = "ttm"
+        self._models = {}
+
+    def _load(self, horizon):
+        if horizon not in self._models:
+            import torch
+            from tsfm_public.toolkit.get_model import get_model
+            model = get_model(self.model_path,
+                              context_length=self.CONTEXT,
+                              prediction_length=horizon)
+            model.eval()
+            self._models[horizon] = model.to(torch.device(self.device))
+        return self._models[horizon]
+
+    def predict(self, history, horizon, exog_past=None, exog_future=None):
+        import torch
+        history = np.asarray(history, dtype=float)
+
+        # Left-pad with the oldest observation. Repeating a value adds no
+        # information; it only satisfies the fixed input width.
+        if len(history) < self.CONTEXT:
+            pad = np.full(self.CONTEXT - len(history), history[0], dtype=float)
+            window = np.concatenate([pad, history])
+        else:
+            window = history[-self.CONTEXT:]
+
+        # Standardise on the context. A pretrained model has no idea what units
+        # soil moisture is in, and the scale of these channels is nothing like
+        # its training data.
+        centre = window.mean()
+        scale = window.std()
+        if scale < 1e-8:
+            return np.full(horizon, history[-1], dtype=float)
+        normalised = (window - centre) / scale
+
+        tensor = torch.tensor(normalised, dtype=torch.float32).reshape(1, self.CONTEXT, 1)
+        with torch.no_grad():
+            output = self._load(horizon)(past_values=tensor.to(self.device))
+
+        prediction = getattr(output, "prediction_outputs", None)
+        if prediction is None:
+            prediction = output[0]
+        prediction = prediction.detach().cpu().numpy().reshape(-1)
+
+        return prediction[:horizon] * scale + centre
+
+    def warm_up(self, context_length, horizon):
+        self.predict(np.zeros(context_length) + np.arange(context_length) * 1e-3, horizon)
 
 
 class DrivenDrying(Forecaster):

@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 
 from .forecasters import (Persistence, SeasonalNaive, DampedTrend,
-                          ChronosForecaster, DrivenDrying, Ensemble)
+                          ChronosForecaster, DrivenDrying, Ensemble, TTMForecaster)
 from .features import compute_vpd
 
 
@@ -235,8 +235,10 @@ if __name__ == "__main__":
     models = [
         Persistence(),
         SeasonalNaive(SEASON),
-        DampedTrend(),
         ChronosForecaster("amazon/chronos-bolt-tiny"),
+        # Pretrained like Chronos but about a million parameters instead of
+        # nine. See TTMForecaster for the padding it needs and what that costs.
+        TTMForecaster(),
     ]
     if channel in SOIL_MOISTURE:
         models += [

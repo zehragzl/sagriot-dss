@@ -2,5 +2,8 @@
 __pycache__/
 *.pyc
 data/*.csv
+# Manual annotations are not log data - they are the record of what was done
+# to the plant and when, and nothing else reproduces them.
+!data/events.csv
 .DS_Store
 slides/
