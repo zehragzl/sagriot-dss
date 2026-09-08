@@ -28,7 +28,7 @@ sensors ──► store (raw log) ──► features ──► rules ──► r
 | `store.py` | Appends raw readings and issued advice to CSV |
 | `run_real.py` | Live loop: read every 30 s, forecast every 10 min |
 | `advise.py` | Forecast → future rows → rules → earliest crossing → lead-time decision |
-| `forecasters.py` | Persistence, seasonal naive, damped trend, driven drying, Chronos, ensemble — each with a predictive band |
+| `forecasters.py` | Persistence, seasonal naive, driven drying, TTM, Chronos, ensemble — each with a predictive band. Damped trend is kept but not selected |
 | `evaluate.py` | Rolling-origin evaluation with signal-level and decision-level metrics |
 | `benchmark.py` | Runs the evaluation across datasets and channels |
 | `measure.py` | Inference latency and memory on the target hardware |
@@ -154,10 +154,18 @@ Logs are not tracked in git.
 - **The best method depends on the environment.** Seasonal naive was the strongest
   forecaster for light in a climate-controlled greenhouse and among the worst in an
   uncontrolled office — the daily cycle there is imposed by the controller, not by physics.
-- **A grey-box model beat a pretrained transformer on the irrigation decision** — measured
-  on a Raspberry Pi 5 at 0.07 ms and 0.1 MB against 34.5 ms and 359 MB.
+- **A grey-box model matched a pretrained transformer on the irrigation decision** and
+  found the crossing time three times more precisely — measured on a Raspberry Pi 5 at
+  0.09 ms and no measurable memory against 35.3 ms and 728 MB.
+- **What a model costs is its runtime, not its weights.** A one-million-parameter model
+  holds 718 MB and a forty-eight-million one holds 884 MB, because both load the same
+  deep-learning stack. A model of two coefficients avoids it entirely.
+- **Being pretrained did not help.** TTM, pretrained on roughly 700 M samples, was never
+  the most accurate and never the best detector in any of the twenty-one cases.
 - **Some channels should not be forecast at all.** For electrical conductivity no method
   improved on carrying the last value forward.
+- **The dominant cost was the log, not the model.** Reading the record took 581 ms of a
+  699 ms cycle and grew with it; reading only the tail returns identical output in 43 ms.
 
 Details, figures and honest limitations are in the internship report.
 
@@ -165,15 +173,19 @@ Details, figures and honest limitations are in the internship report.
 
 ## Known limitations
 
-- Single pot, single plant, one location, seven days of continuous recording.
+- Single pot, single plant, one location, nineteen days of continuous recording. The
+  decision metrics rest on four physically distinct crossings there; the statistical
+  weight is in the two reference greenhouses, which carry a hundred or more per channel.
 - The surrogate plant is a chrysanthemum; thresholds are the tomato configuration and are
   used as fixed event markers, not as horticultural advice for that species.
 - The RS485 probe reports bulk EC while the thresholds are defined for pore-water EC, so
   the fertilisation rule was not evaluated on the testbed.
 - Lux-to-PAR conversion is an approximation; DLI inherits that error.
 - VPD is computed from air rather than leaf temperature.
-- The context window is re-read from the full log on each cycle; a rolling buffer would be
-  needed at longer deployment horizons.
+- The per-channel assignment in `config.py` was originally derived by point accuracy — the
+  criterion this work argues against. On `air_temp` the selected method has never warned
+  about a single crossing, which makes the ventilation early warning decorative on that
+  channel. No better method exists there, so the entry is left in place with a comment.
 - DLI and disease-hour accumulators reset on restart. The coverage check suppresses DLI
   rather than reporting an incomplete value, so this degrades safely.
 - TimesFM and Moirai were considered and not implemented. The capability that made Moirai

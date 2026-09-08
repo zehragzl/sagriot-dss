@@ -4,8 +4,8 @@ import time
 import numpy as np
 import pandas as pd
 
-from .forecasters import (Persistence, SeasonalNaive, DampedTrend,
-                          ChronosForecaster, DrivenDrying, Ensemble, TTMForecaster)
+from .forecasters import (Persistence, SeasonalNaive, ChronosForecaster,
+                          DrivenDrying, Ensemble, TTMForecaster)
 from .features import compute_vpd
 
 
@@ -249,6 +249,9 @@ if __name__ == "__main__":
     if channel in SOIL_MOISTURE:
         models += [
             DrivenDrying(("vpd",)),
+            # Same model with one more coefficient: the rate now depends on how
+            # much water is left, not only on how hard the air is pulling.
+            DrivenDrying(("vpd",), level_term=True),
             DrivenDrying(("vpd", "par")),
             # Recency weighting was measured and did not help: within a 24 h
             # context the drying rate is effectively constant, so there is

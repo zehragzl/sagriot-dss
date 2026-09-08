@@ -1,6 +1,7 @@
 import numpy as np
 import pandas as pd
 
+from .features import IrrigationWatch, night_baseline, baseline_alerts
 from .plants import PLANTS
 from .rules import get_thresholds, classify, rules, CRIT_LOW, CRIT_HIGH, NORMAL
 from .forecasters import (QUANTILE_LEVELS, Persistence, SeasonalNaive, DampedTrend,
@@ -132,6 +133,39 @@ def advise_checks():
     return ok
 
 
+def sensing_checks():
+    """The two watchers added after the system missed things a person caught."""
+    ok = True
+    print("\n-- sensing --")
+
+    watch = IrrigationWatch(jump=3.0)
+    seen = [watch.check({"soil_vwc": v}) for v in (45.2, 45.1, 48.7, 66.0, 65.8, 64.2)]
+    ok &= check("irrigation is detected from a step up",
+                seen[2] is not None and seen[3] is not None)
+    ok &= check("drying is not mistaken for irrigation",
+                all(s is None for s in (seen[0], seen[1], seen[4], seen[5])))
+
+    watch = IrrigationWatch()
+    ok &= check("a missing soil reading is not an event",
+                watch.check({"air_temp": 21.0}) is None)
+
+    # Eight nights of a stable baseline, then a sensor that gets covered.
+    index = pd.date_range("2026-08-20 02:00", periods=9, freq="1D", tz="Europe/Berlin")
+    steady = pd.DataFrame({"lux": [0.33] * 8 + [0.06], "co2": [420.0] * 9}, index=index)
+    alerts = baseline_alerts(steady)
+    ok &= check("a covered sensor is reported from the night baseline",
+                len(alerts) == 1 and alerts[0]["channel"] == "lux")
+    ok &= check("a steady channel raises nothing",
+                all(a["channel"] != "co2" for a in alerts))
+
+    unchanged = steady.copy(); unchanged.loc[unchanged.index[-1], "lux"] = 0.33
+    ok &= check("an unchanged baseline is silent", baseline_alerts(unchanged) == [])
+
+    ok &= check("night baseline ignores the daytime hours",
+                night_baseline(steady, "lux", start_hour=10, end_hour=12) is None)
+    return ok
+
+
 def main():
     ok = True
 
@@ -213,6 +247,8 @@ def main():
     without_exog = DrivenDrying(("vpd",)).predict(history, 36)
     ok &= check("driven_drying falls back to persistence without drivers",
                 np.allclose(without_exog, history[-1]))
+
+    ok &= sensing_checks()
 
     ok &= advise_checks()
 

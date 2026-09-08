@@ -275,14 +275,27 @@ class DrivenDrying(Forecaster):
     decay < 1 applies exponentially decreasing weight to older samples, so the
     fit tracks a rate that changes with the room. decay=None keeps every sample
     equally weighted, which is the form the reported results were produced with.
+
+    level_term adds the current moisture to the design, so the rate becomes
+    a*demand + b*moisture + c instead of a*demand + c. This is the physics the
+    two-coefficient form leaves out: a soil holds its last water more tightly
+    than its first, so drying slows as the soil dries, and a model with a
+    constant rate arrives at the threshold too early. It costs one coefficient
+    and it changes the forecast from a cumulative sum into a short recursion,
+    because each step's rate now depends on the level the previous step
+    produced. Whether it earns its parameter is a question for the benchmark.
     """
 
-    def __init__(self, drivers=("vpd",), ridge=1e-3, non_increasing=True, decay=None):
+    def __init__(self, drivers=("vpd",), ridge=1e-3, non_increasing=True, decay=None,
+                 level_term=False):
         self.drivers = tuple(drivers)
         self.ridge = ridge
         self.non_increasing = non_increasing
         self.decay = decay
+        self.level_term = level_term
         suffix = f",decay={decay}" if decay else ""
+        if level_term:
+            suffix += "+level"
         self.name = "driven_drying(" + "+".join(self.drivers) + suffix + ")"
         self._warned = False
 
@@ -309,6 +322,10 @@ class DrivenDrying(Forecaster):
         """Returns (point forecast, per-step standard deviation)."""
         delta = np.diff(history)
         past = [np.asarray(exog_past[d], dtype=float)[1:] for d in self.drivers]
+        if self.level_term:
+            # The moisture the step started from, aligned with the change it
+            # produced.
+            past = past + [history[:-1]]
         design = np.column_stack(past + [np.ones(len(delta))])
 
         weights = None
@@ -327,12 +344,28 @@ class DrivenDrying(Forecaster):
         sigma = np.sqrt(max(variance, 0.0))
 
         future = [np.asarray(exog_future[d], dtype=float) for d in self.drivers]
-        design_future = np.column_stack(future + [np.ones(horizon)])
-        rates = design_future @ coefficients
-        if self.non_increasing:
-            rates = np.minimum(rates, 0.0)
 
-        point = history[-1] + np.cumsum(rates)
+        if self.level_term:
+            # Each rate depends on the level the previous step produced, so the
+            # integration is a recursion rather than a cumulative sum. Thirty-six
+            # iterations of three multiplies - still nothing on a microcontroller.
+            *driver_coefficients, level_coefficient, intercept = coefficients
+            point = np.empty(horizon, dtype=float)
+            level = float(history[-1])
+            for step in range(horizon):
+                rate = intercept + level_coefficient * level
+                for column, coefficient in zip(future, driver_coefficients):
+                    rate += coefficient * column[step]
+                if self.non_increasing:
+                    rate = min(rate, 0.0)
+                level += rate
+                point[step] = level
+        else:
+            design_future = np.column_stack(future + [np.ones(horizon)])
+            rates = design_future @ coefficients
+            if self.non_increasing:
+                rates = np.minimum(rates, 0.0)
+            point = history[-1] + np.cumsum(rates)
         # Step errors accumulate through the integration, so the band widens as
         # the square root of the number of steps.
         spread = sigma * np.sqrt(np.arange(1, horizon + 1, dtype=float))

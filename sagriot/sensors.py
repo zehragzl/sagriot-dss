@@ -41,6 +41,14 @@ class SensorHub:
         self.dps310 = self._init("dps310", lambda: adafruit_dps310.DPS310(i2c))
         self.tsl2591 = self._init("tsl2591", lambda: adafruit_tsl2591.TSL2591(i2c))
         self.rtc = self._init("ds3231", lambda: adafruit_ds3231.DS3231(i2c))
+        # The soil probe is on a serial link rather than the I2C bus, so it has
+        # no constructor to fail at start-up. It was therefore missing from the
+        # availability report entirely - the one device whose loss matters most
+        # to the irrigation rule was the one not listed. A single read at start
+        # settles it.
+        # One attempt, not the usual three: a missing probe would otherwise
+        # hold the start-up for fifteen seconds.
+        self.available["soil_rs485"] = self.read_soil(attempts=1) is not None
         if VWC_FIELD_CAPACITY is None:
             print("[sensors] VWC_FIELD_CAPACITY not calibrated - soil_fc will not be reported")
 

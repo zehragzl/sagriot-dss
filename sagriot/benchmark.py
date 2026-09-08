@@ -29,6 +29,9 @@ def run(paths):
     ]
     driven_models = [
         DrivenDrying(("vpd",)),
+        # Same model with one more coefficient: the rate now depends on how much
+        # water is left, not only on how hard the air is pulling.
+        DrivenDrying(("vpd",), level_term=True),
         DrivenDrying(("vpd", "par")),
         Ensemble([DrivenDrying(("vpd",)),
                   ChronosForecaster("amazon/chronos-bolt-tiny")]),

@@ -16,7 +16,10 @@ CONTEXT = CONTEXT_HOURS * 60 // STEP_MINUTES
 HORIZON = 3 * 60 // STEP_MINUTES
 SEASON = 24 * 60 // STEP_MINUTES
 
-MEASURED = ["air_temp", "air_humidity", "co2", "par", "soil_vwc", "soil_temp", "ec"]
+# lux is carried alongside par even though no rule reads it: par is lux times a
+# constant and rounds to zero at night, while lux keeps the resolution the
+# quiet-state baseline check needs to see a sensor being covered.
+MEASURED = ["air_temp", "air_humidity", "co2", "lux", "par", "soil_vwc", "soil_temp", "ec"]
 STEP_SECONDS = STEP_MINUTES * 60
 DRIVEN_CHANNELS = ("air_temp", "air_humidity", "par", "co2", "soil_temp", "ec")
 
@@ -31,8 +34,41 @@ LEAD_MINUTES = {
 }
 DEFAULT_LEAD = 60
 
+def _tail_frame(path, hours):
+    """Parse only the end of the log.
+
+    The live loop needs the last twenty-five hours and nothing else, but the
+    record keeps growing: reading all of it cost 581 ms at 54,000 rows and was
+    five times the cost of forecasting every channel. That cost is a property
+    of the archive, not of the decision, so it should not grow with it.
+
+    The file is read backwards in doubling chunks until the oldest line in hand
+    predates the cutoff. Correctness is unchanged - the cutoff filter still
+    decides what is kept - so this is only a cheaper way to reach the same rows.
+    """
+    import io, os
+
+    size = os.path.getsize(path)
+    with open(path, "rb") as handle:
+        header = handle.readline()
+        budget = 1 << 18                       # 256 KB, about 9 hours at 30 s
+        while True:
+            start = max(len(header), size - budget)
+            handle.seek(start)
+            chunk = handle.read()
+            if start > len(header):
+                chunk = chunk.split(b"\n", 1)[1] if b"\n" in chunk else b""
+            frame = pd.read_csv(io.BytesIO(header + chunk), parse_dates=["timestamp"])
+            if frame.empty:
+                return frame
+            span = frame["timestamp"].iloc[-1] - frame["timestamp"].iloc[0]
+            if span >= pd.Timedelta(hours=hours) or start <= len(header):
+                return frame
+            budget *= 2
+
+
 def load_recent(path, hours=CONTEXT_HOURS + 1, resample=RESAMPLE):
-    frame = pd.read_csv(path, parse_dates=["timestamp"])
+    frame = _tail_frame(path, hours)
     frame = frame.sort_values("timestamp").set_index("timestamp")
     cutoff = frame.index[-1] - pd.Timedelta(hours=hours)
     frame = frame.loc[cutoff:]
@@ -53,6 +89,8 @@ def make_forecaster(name):
         return DrivenDrying(("vpd",))
     if name == "driven_drying_vpd_par":
         return DrivenDrying(("vpd", "par"))
+    if name == "driven_drying_vpd_level":
+        return DrivenDrying(("vpd",), level_term=True)
     if name == "driven_drying_vpd_decay":
         return DrivenDrying(("vpd",), decay=0.999)
     if name == "ensemble_drying_chronos":

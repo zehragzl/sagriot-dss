@@ -87,6 +87,93 @@ def enrich_row(timestamp, measured, light, disease):
         )
     return row
 
+class IrrigationWatch:
+    """Notices that somebody watered.
+
+    The soil model clips its rates at zero, because soil cannot gain water
+    without input, so to the forecaster a watering is only an outlier. Nothing
+    in the system knew that the state had changed, and on 2 September that was
+    visible: the standing advice kept reading ADVISE NOW for ten minutes after
+    the pot had been watered and the reading had already risen from 45 to 101
+    %FC. With a valve on the end of it, that is a second irrigation.
+
+    A rise of more than a few points between two consecutive readings cannot be
+    anything else - the soil has no other way to gain water in thirty seconds.
+    """
+
+    def __init__(self, jump=3.0, channel="soil_vwc"):
+        self.jump = jump
+        self.channel = channel
+        self._last = None
+
+    def check(self, row):
+        """Returns (before, after) when a watering is detected, else None."""
+        value = row.get(self.channel)
+        if value is None:
+            return None
+        previous, self._last = self._last, value
+        if previous is None:
+            return None
+        return (previous, value) if value - previous >= self.jump else None
+
+
+def night_baseline(frame, channel, start_hour=1, end_hour=4):
+    """Median of a channel during the hours when it should be at rest.
+
+    A dark room has a known light level and an empty room a known CO2 level, so
+    a step in either between one night and the next has to be physical: a leaf
+    across the sensor, a probe working loose, a drift in the device itself.
+    Nothing else about the reading looks wrong, which is why the liveness checks
+    never saw it - a covered sensor still returns fresh, plausible, changing
+    values.
+
+    Returns a Series indexed by date. Written from a habit that caught two real
+    obstructions of the light sensor by hand; the point of putting it here is
+    that nobody should have to remember to look.
+    """
+    if channel not in frame.columns:
+        return None
+    hours = frame.index.hour
+    window = frame[(hours >= start_hour) & (hours <= end_hour)]
+    if window.empty:
+        return None
+    return window[channel].groupby(window.index.date).median().dropna()
+
+
+def baseline_alerts(frame, channels=("lux", "co2"), nights=7, tolerance=0.5):
+    """Compare the most recent night against the nights before it.
+
+    tolerance is a fraction of the reference: 0.5 reports a halving or a
+    doubling. Channels rest at very different magnitudes, so a relative test is
+    the only one that transfers between them.
+
+    lux rather than par: par is lux times a small constant and rounds to zero
+    overnight, which destroys exactly the resolution this check depends on.
+    """
+    alerts = []
+    for channel in channels:
+        series = night_baseline(frame, channel)
+        if series is None or len(series) < 3:
+            continue
+        latest, history = series.iloc[-1], series.iloc[-(nights + 1):-1]
+        if history.empty:
+            continue
+        reference = float(history.median())
+        if reference <= 0:
+            continue
+        change = (float(latest) - reference) / reference
+        if abs(change) >= tolerance:
+            alerts.append({
+                "channel": channel,
+                "date": series.index[-1],
+                "latest": round(float(latest), 3),
+                "reference": round(reference, 3),
+                "change": round(change, 3),
+                "nights": len(history),
+            })
+    return alerts
+
+
 class FreshnessTracker:
     def __init__(self, stuck_repeats=STUCK_REPEATS, channels=WATCHED_CHANNELS):
         self.stuck_repeats = stuck_repeats

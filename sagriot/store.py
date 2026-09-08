@@ -51,6 +51,27 @@ def append_advice(path, timestamp, kind, item):
         writer.writerow(record)
 
 
+EVENT_COLUMNS = ["timestamp", "event", "channel", "detail"]
+EVENT_PATH = "data/events.csv"
+
+
+def append_event(timestamp, event, channel, detail, path=EVENT_PATH):
+    """Record something that happened to the plant or the hardware.
+
+    This file was kept by hand for the first three weeks - waterings, a probe
+    that was knocked, a leaf found across the light sensor. Anything the system
+    can recognise on its own belongs here without being asked, because the
+    annotations that matter most are the ones nobody remembered to write down.
+    """
+    is_new = _prepare(path, EVENT_COLUMNS)
+    with open(path, "a", newline="") as handle:
+        writer = csv.DictWriter(handle, fieldnames=EVENT_COLUMNS, extrasaction="ignore")
+        if is_new:
+            writer.writeheader()
+        writer.writerow({"timestamp": timestamp.isoformat(), "event": event,
+                         "channel": channel, "detail": detail})
+
+
 def append_row(path, timestamp, row):
     is_new = _prepare(path, COLUMNS)
     with open(path, "a", newline="") as handle:

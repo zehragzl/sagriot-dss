@@ -1,7 +1,8 @@
 import time
 
 from .config import PLANT, LOG_PATH, ADVICE_PATH, READ_INTERVAL_SECONDS
-from .features import DailyLight, DiseaseHours, FreshnessTracker, enrich_row
+from .features import (DailyLight, DiseaseHours, FreshnessTracker, IrrigationWatch,
+                       baseline_alerts, enrich_row)
 from .rules import rules, get_thresholds
 from .advise import (CONTEXT, HORIZON, STEP_MINUTES, load_recent, build_forecasters,
                      forecast_scenarios, advise_range)
@@ -61,6 +62,7 @@ def main():
     rh_trigger, vpd_trigger = disease_triggers(PLANT)
     disease = DiseaseHours(rh_trigger, vpd_trigger)
     freshness = FreshnessTracker()
+    irrigation = IrrigationWatch()
     print(f"[run_real] plant={PLANT}  disease trigger: RH>{rh_trigger}  VPD<{vpd_trigger}")
     print(f"[run_real] logging to {LOG_PATH} every {READ_INTERVAL_SECONDS} s")
 
@@ -69,6 +71,7 @@ def main():
     last_forecast = 0.0
     pending = {}
     pending_at = None
+    last_baseline_day = None
 
     while True:
         started = time.monotonic()
@@ -87,6 +90,32 @@ def main():
             print("   -> no recommendations")
         for rec in recommendations:
             print(f"   -> [{rec['status']}] {rec['rule']}: {rec['action']}")
+
+        watered = irrigation.check(measured)
+        if watered:
+            before, after = watered
+            print(f"   ** irrigation detected: {before} -> {after} %VWC")
+            store.append_event(timestamp, "irrigation", "soil_vwc",
+                               f"Detected from a step of {after - before:.1f} points "
+                               f"between consecutive readings.")
+            # The state the standing advice was computed from no longer exists.
+            # Drop it and recompute now rather than counting down advice for an
+            # action that has already been taken.
+            pending, pending_at, announced = {}, None, {}
+            last_forecast = 0.0
+
+        # Once a day, after the quiet hours have passed, check the channels that
+        # have a known resting state.
+        if last_baseline_day != timestamp.date() and timestamp.hour >= 5:
+            last_baseline_day = timestamp.date()
+            try:
+                for alert in baseline_alerts(load_recent(LOG_PATH, hours=24 * 10)):
+                    print(f"   ! {alert['channel']}: night baseline "
+                          f"{alert['latest']} against {alert['reference']} over "
+                          f"{alert['nights']} nights ({alert['change']:+.0%}) "
+                          f"- check the sensor")
+            except Exception as error:
+                print(f"   ! baseline check failed: {type(error).__name__}: {error}")
 
         fresh = False
         if time.monotonic() - last_forecast >= FORECAST_INTERVAL_SECONDS:

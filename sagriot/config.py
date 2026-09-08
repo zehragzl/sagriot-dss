@@ -29,15 +29,28 @@ DISEASE_HOURS_TRIGGER = 2.0
 # shortfall can be reported. Before this hour the day may still catch up.
 DAY_END_HOUR = 18
 
+# Per-channel choice, re-measured on the 2 September benchmark (testbed rows).
+#
+# One entry here is a known weakness rather than a choice. On air_temp the most
+# accurate method available is also one that never warns: chronos_tiny has a
+# skill of 0.221 and a recall of 0.000 on nine crossings. The only method with
+# useful recall on that channel is seasonal naive (0.333), and its skill is
+# -2.300, which in this room means wild forecasts. So the early warning for
+# Rule 4 is, on temperature, close to decorative. This is the exact mistake
+# this work is about - a forecaster chosen by error - found in its own
+# configuration. It is left visible instead of quietly patched.
 FORECASTERS = {
-    # damped_trend was selected here by measurement and has been dropped along
-    # with the method. This is an interim choice: chronos_tiny already holds the
-    # other two atmospheric channels. Re-check it against the next benchmark.
-    "air_temp":     "chronos_tiny",
-    "air_humidity": "chronos_tiny",
-    "par":          "persistence",        # chronos_tiny yerine
-    "co2":          "persistence",
-    "soil_vwc":     "driven_drying_vpd",  # _vpd_par yerine
-    "soil_temp":    "chronos_tiny",
-    "ec":           "persistence",
+    "air_temp":     "chronos_tiny",       # accurate, recall 0.000 - see note above
+    "air_humidity": "chronos_tiny",       # recall 0.200; chronos_small gains 0.025 for 3.5x the cost
+    # chronos_tiny forecasts par far more accurately here (skill 0.290 against
+    # 0.000) and it is not worth taking. par has no threshold of its own; it
+    # feeds the daily light budget, and no rule outcome on this site changes
+    # with a better par forecast. The accurate method costs 33 ms instead of
+    # 0.014 ms - two thousand times more compute for no decision. Worth
+    # re-checking at a site where the light budget actually crosses 25 mol.
+    "par":          "persistence",
+    "co2":          "persistence",        # every other method scores below zero here
+    "soil_vwc":     "driven_drying_vpd",  # recall 0.889, 13.1 min, 0.23 ms - unchanged
+    "soil_temp":    "chronos_tiny",       # recall 0.500 and better timing than chronos_small
+    "ec":           "persistence",        # no method beats it; the EC scale artefact is upstream
 }
