@@ -7,3 +7,5 @@ data/*.csv
 !data/events.csv
 .DS_Store
 slides/
+.venv*/
+.venv*/
