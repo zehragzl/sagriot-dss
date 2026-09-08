@@ -8,4 +8,4 @@ data/*.csv
 .DS_Store
 slides/
 .venv*/
-.venv*/
+logs/
