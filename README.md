@@ -165,6 +165,10 @@ Logs are not tracked in git.
   deep-learning stack. A model of two coefficients avoids it entirely.
 - **Being pretrained did not help.** TTM, pretrained on roughly 700 M samples, was never
   the most accurate and never the best detector in any of the twenty-one cases.
+- **The decision costs nothing; the computer that makes it costs everything.** Read from
+  the Pi 5 power-management chip: 1.90 W idle, 4.52 W forecasting, 0.27 J per decision,
+  0.011 Wh a day against the 45.6 Wh of simply keeping the board powered. The case for a
+  microcontroller is not that inference is expensive — it is that a microcontroller sleeps.
 - **Some channels should not be forecast at all.** For electrical conductivity no method
   improved on carrying the last value forward.
 - **The dominant cost was the log, not the model.** Reading the record took 581 ms of a
