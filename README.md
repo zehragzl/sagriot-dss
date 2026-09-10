@@ -154,9 +154,12 @@ Logs are not tracked in git.
 - **The best method depends on the environment.** Seasonal naive was the strongest
   forecaster for light in a climate-controlled greenhouse and among the worst in an
   uncontrolled office — the daily cycle there is imposed by the controller, not by physics.
-- **A grey-box model matched a pretrained transformer on the irrigation decision** and
-  found the crossing time three times more precisely — measured on a Raspberry Pi 5 at
-  0.09 ms and no measurable memory against 35.3 ms and 728 MB.
+- **A grey-box model matched a pretrained transformer on the irrigation decision** —
+  eleven crossings of twelve for both — and found the crossing time nearly three times
+  more precisely, 16.8 min against 46.4. Measured on a Raspberry Pi 5 at 0.09 ms and no
+  measurable memory against 35.3 ms and 728 MB. The advantage belongs to the regime and
+  not to the model: in both reference greenhouses, where a controller refills the
+  substrate on a schedule, the same two coefficients fall behind Chronos tiny.
 - **What a model costs is its runtime, not its weights.** A one-million-parameter model
   holds 718 MB and a forty-eight-million one holds 884 MB, because both load the same
   deep-learning stack. A model of two coefficients avoids it entirely.
@@ -165,7 +168,8 @@ Logs are not tracked in git.
 - **Some channels should not be forecast at all.** For electrical conductivity no method
   improved on carrying the last value forward.
 - **The dominant cost was the log, not the model.** Reading the record took 581 ms of a
-  699 ms cycle and grew with it; reading only the tail returns identical output in 43 ms.
+  699 ms cycle and grew with it; reading only the tail returns byte-identical output in
+  47 ms on the Pi at 60,190 rows, and the whole cycle falls to 158 ms.
 
 Details, figures and honest limitations are in the internship report.
 
@@ -173,9 +177,10 @@ Details, figures and honest limitations are in the internship report.
 
 ## Known limitations
 
-- Single pot, single plant, one location, nineteen days of continuous recording. The
-  decision metrics rest on four physically distinct crossings there; the statistical
-  weight is in the two reference greenhouses, which carry a hundred or more per channel.
+- Single pot, single plant, one location, twenty-one days of continuous recording
+  (19 August – 9 September, 60,190 readings). The decision metrics rest on four
+  physically distinct crossings there; the statistical weight is in the two reference
+  greenhouses, which carry a hundred or more per channel.
 - The surrogate plant is a chrysanthemum; thresholds are the tomato configuration and are
   used as fixed event markers, not as horticultural advice for that species.
 - The RS485 probe reports bulk EC while the thresholds are defined for pore-water EC, so

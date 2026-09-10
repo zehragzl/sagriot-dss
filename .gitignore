@@ -5,6 +5,10 @@ data/*.csv
 # Manual annotations are not log data - they are the record of what was done
 # to the plant and when, and nothing else reproduces them.
 !data/events.csv
+# The frozen record every reported result was computed from. The live log is
+# not tracked because it changes; this one cannot, and without it none of the
+# numbers in the report can be reproduced.
+!data/snapshot_0909.csv
 .DS_Store
 slides/
 .venv*/
