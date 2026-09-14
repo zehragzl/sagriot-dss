@@ -66,6 +66,10 @@ pip install torch --index-url https://download.pytorch.org/whl/cpu
 Chronos is optional. If `torch` is missing, the affected channels fall back to
 persistence and the system reports the substitution at startup.
 
+`requirements-pi-frozen.txt` is not for installing from. It records the exact versions
+present on the node when the reported latency and memory figures were measured, because
+those figures belong to a version of torch and transformers as much as to a model.
+
 ---
 
 ## Run
